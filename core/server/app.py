@@ -10,6 +10,7 @@ CapsWriter Offline 服务端主程序门面类 (Facade)
 import os
 import sys
 import asyncio
+import threading
 from pathlib import Path
 from config_server import ServerConfig as Config, __version__
 from .state import ServerState, console
@@ -26,9 +27,14 @@ class CapsWriterServer:
     """
     CapsWriter 服务端外观类
     
-    管理的外部接口极其简洁：start()。
+    管理的外部接口极其简洁：start()；托盘菜单另外会调用 stop() / restart()。
     """
     def __init__(self):
+        # 重启时要用同一条命令再启动一次；非冻结模式下 argv[0] 可能是相对路径，必须在切换目录前记下
+        self._launch_cmd = launch.current_command()
+        self._restart_requested = False
+        self._stopped = threading.Event()   # stop() 全部清理完成后置位
+
         # 确保正确的工作目录
         self.base_dir = Path(__file__).parents[2]
         os.chdir(self.base_dir)
@@ -84,7 +90,41 @@ class CapsWriterServer:
         self.loop.stop()
 
         logger.info("服务端资源清理完成")
-        console.print('[green4]再见！')
+        self._stopped.set()
+        if not self._restart_requested:
+            console.print('[green4]再见！')
+
+    def restart(self):
+        """
+        重启服务端（托盘菜单“重启”），效果等同于“退出”后再手动启动一次。
+
+        不能像客户端那样先拉起新进程再退出：新进程启动时会检查端口，而旧进程此时还占着
+        端口和显存。所以这里只做与“退出”完全相同的清理，新进程由 start() 在主循环结束、
+        端口与识别子进程都已释放之后拉起（见 _finish）。
+        """
+        if not self.is_alive: return
+        logger.info("收到重启请求：先完整停止服务端，再以相同命令行启动新实例")
+        self._restart_requested = True
+        self.stop()
+
+    def _finish(self, exit_code: int):
+        """start() 的唯一出口：如有重启请求，此时资源已全部释放，拉起新实例后退出"""
+        if self._restart_requested:
+            # stop() 在托盘线程里执行，它的第一步就会让主循环结束；
+            # 必须等识别子进程真正退出（显存释放）后再拉起新实例
+            if not self._stopped.wait(timeout=30):
+                logger.warning("等待资源清理超时，仍继续重启")
+            try:
+                launch.spawn_new_instance(self._launch_cmd)
+                logger.info(f"已启动新的服务端实例：{self._launch_cmd}")
+                console.print('[green4]正在重启...')
+                exit_code = 0
+            except Exception as e:
+                logger.error(f"重启失败，无法启动新实例（{self._launch_cmd}）：{e}", exc_info=True)
+                console.print(f'[bold red]重启失败：{e}[/bold red]')
+                launch.pause_before_exit()
+                exit_code = 1
+        sys.exit(exit_code)
 
 
     def start(self):
@@ -130,11 +170,13 @@ class CapsWriterServer:
 
         # 拉起识别子进程（阻塞到模型加载完成）
         self.process_manager.start()
-        if not self.is_alive:   # 子进程加载模型失败，已触发 stop()
-            sys.exit(1)
+        if not self.is_alive:   # 子进程加载模型失败，或加载期间被要求退出/重启，已触发 stop()
+            self._finish(1)
 
         # 开启网络服务监听 (接管当前线程直至退出)
         try:
             self.loop.run_until_complete(self.socket_manager.start()) 
         except RuntimeError:
             pass
+
+        self._finish(0)

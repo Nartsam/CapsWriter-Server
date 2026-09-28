@@ -9,7 +9,7 @@
 - 禁用控制台窗口的关闭按钮（防止误关）
 - 最小化时自动隐藏到托盘
 - 双击托盘图标显示/隐藏窗口
-- 托盘菜单退出程序
+- 托盘菜单重启 / 退出程序
 
 注意：pystray 在 Linux 无 GUI 环境下无法导入，因此采用延迟导入。
 """
@@ -22,8 +22,9 @@ import platform
 from typing import Optional
 from . import logger, set_ui_logger
 
-# 退出回调函数（由主程序传入）
+# 退出 / 重启回调函数（由主程序传入）
 _exit_callback = None
+_restart_callback = None
 
 # 是否可用（在 enable_min_to_tray 时检测）
 _tray_available = None
@@ -35,6 +36,14 @@ def _set_exit_callback(callback):
 
 def _get_exit_callback():
     return _exit_callback
+
+def _set_restart_callback(callback):
+    """设置重启回调函数（不设置则菜单里没有“重启”）"""
+    global _restart_callback
+    _restart_callback = callback
+
+def _get_restart_callback():
+    return _restart_callback
 
 
 def _check_tray_available() -> bool:
@@ -232,6 +241,8 @@ class _TraySystem:
             for opt_name, opt_func in more_options:
                 menu_items.append(item(opt_name, opt_func))
 
+        if _get_restart_callback():
+            menu_items.append(item('🔄 重启', self.on_restart))
         menu_items.append(item('❌ 退出', self.on_exit))
 
         self.icon = pystray.Icon(
@@ -260,6 +271,28 @@ class _TraySystem:
                 if _is_window_visible(self.hwnd) and _is_window_minimized(self.hwnd):
                     user32.ShowWindow(self.hwnd, SW_HIDE)
             time.sleep(0.2)
+
+    def on_restart(self, icon, item) -> None:
+        """
+        托盘重启处理
+
+        只负责停掉本托盘并把请求交给主程序；主程序会先完整释放资源（端口、显存），
+        再以相同命令行拉起新进程——新进程有自己的控制台和托盘，所以这里不恢复旧窗口。
+        """
+        logger.info("托盘重启: 用户点击重启菜单")
+        self.should_exit = True
+
+        restart_callback = _get_restart_callback()
+        if restart_callback:
+            try:
+                restart_callback()
+            except Exception as e:
+                logger.error(f"调用重启回调函数时发生错误: {e}")
+
+        try:
+            self.icon.stop()
+        except Exception as e:
+            logger.warning(f"停止托盘图标时发生错误: {e}")
 
     def on_exit(self, icon, item) -> None:
         """托盘退出处理"""
@@ -310,7 +343,7 @@ class _TraySystem:
         self.toggle_window()
 
 
-def enable_min_to_tray(name: Optional[str] = None, icon_path: Optional[str] = None, exit_callback=None, more_options: list = None) -> bool:
+def enable_min_to_tray(name: Optional[str] = None, icon_path: Optional[str] = None, exit_callback=None, more_options: list = None, restart_callback=None) -> bool:
     """
     启用最小化到托盘功能
 
@@ -322,15 +355,18 @@ def enable_min_to_tray(name: Optional[str] = None, icon_path: Optional[str] = No
         icon_path: 图标文件路径，默认动态生成
         exit_callback: 退出回调函数，当用户点击托盘退出菜单时调用
         more_options: 额外菜单项列表，格式为 [(名称, 回调函数), ...]
+        restart_callback: 重启回调函数；提供时菜单中会出现“重启”项（位于“退出”之前）
 
     Returns:
         是否启用了托盘（非 Windows、缺少 pystray、没有控制台窗口时为 False）
     """
     global _tray_instance
 
-    # 设置退出回调函数
+    # 设置退出 / 重启回调函数
     if exit_callback is not None:
         _set_exit_callback(exit_callback)
+    if restart_callback is not None:
+        _set_restart_callback(restart_callback)
 
     # 检查托盘功能是否可用
     if not _check_tray_available():

@@ -118,9 +118,10 @@ class ProcessManager:
 
             self.app.state.queue_in.put(None)
             
-            # 如果 2 秒内没退，则强制 kill
+            # 如果 2 秒内没退，则强制 kill，并等它真正结束（重启时新实例要用这块显存）
             self._process.join(timeout=2)
             if self._process.is_alive():
                 logger.debug("子进程未响应优雅退出，执行强制终止")
                 self._process.terminate()
+                self._process.join(timeout=5)
             

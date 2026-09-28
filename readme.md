@@ -14,7 +14,7 @@ Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWrite
 
 1. 需要 [VC++ 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)（缺 DLL 时安装）。
 2. 下载模型（约 2.5GB，只需一次）：在项目目录打开终端运行 `start_server.exe --download-models`。也可以直接双击 `start_server.exe`，缺模型时会询问是否下载。
-3. 双击 `start_server.exe`，窗口会自动最小化到托盘；托盘菜单可显示/隐藏窗口或退出。
+3. 双击 `start_server.exe`，窗口会自动最小化到托盘；右键托盘图标可显示/隐藏窗口、重启或退出（重启等同于退出后再手动启动一次，改完配置用它即可生效）。
 4. 开机启动：把 `start_server.exe` 的快捷方式放进 `Win+R` → `shell:startup` 打开的文件夹。
 
 `start_server.exe` 只是启动器，运行时在 `internal/`，代码在 `core/`，都随仓库提供，clone 下来即可用（模型除外）。

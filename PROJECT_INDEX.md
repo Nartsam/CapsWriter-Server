@@ -54,7 +54,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 │   │   └── ui/tray_manager.py# 托盘管理
 │   ├── tools/                # chinese_itn、format_tools、token_sync、signal_handler、daemon_executor、
 │   │                         # asyncio_to_thread、empty_working_set（Windows 内存回收）、my_status（rich 状态动画）
-│   └── ui/tray.py            # 系统托盘（仅 Windows；其他平台 enable_min_to_tray 直接跳过）
+│   └── ui/tray.py            # 系统托盘：显示/隐藏、重启、退出（仅 Windows；其他平台 enable_min_to_tray 直接跳过）
 ├── models/                   # 模型（不进 git，见 models/README.md）
 ├── tools/smoke_test.py       # 冒烟测试客户端（仅标准库）+ assets/demo.wav
 ├── assets/icon.ico           # 托盘图标
@@ -93,6 +93,15 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 7. `runtime_status.initialize()` 重置忙闲状态文件
 8. `ProcessManager.start()`：建 Manager 列表 → 拉起识别子进程 → 阻塞等待子进程发来“模型已加载”（子进程先调用 `apply_overrides()`，因为 Windows 的 spawn 会重新 import 配置）；子进程加载失败则退出码 1
 9. `SocketManager.start()`：`websockets.serve`，主线程进入 `ws_send` 发送循环直到退出
+10. `_finish()`：`start()` 的唯一出口（`sys.exit`），有重启请求时在这里拉起新实例
+
+### 退出与重启（托盘菜单）
+
+- **退出**：`TrayManager._request_exit` → `CapsWriterServer.stop()`：通知 `ws_send` 结束 → 关闭 WebSocket（释放端口）→ 结束识别子进程（先发 `None` 让它优雅退出，2 秒不退就 terminate 并等待其结束）→ 卸载托盘 → 停止事件循环。
+- **重启**（2026-09-28 新增，菜单项位置与 Client 一致）：`TrayManager._request_restart` → `CapsWriterServer.restart()` 置重启标志后执行与“退出”完全相同的 `stop()`；主线程走到 `_finish()` 时先等 `stop()` 全部完成（识别子进程真正退出、显存释放），再用 `launch.spawn_new_instance()` 以**启动当前进程时的同一条命令行**（`launch.current_command()`，在 `__init__` 切换目录前记录；exe 为 `[start_server.exe, 参数...]`）拉起新进程，然后退出。Windows 上新进程放在新控制台窗口里（`CREATE_NEW_CONSOLE`），效果等同于双击 exe；环境变量随之继承，命令行参数与 `CAPSWRITER_*` 覆盖都保持不变。
+- 为什么不像 Client 那样“先拉起新进程再退出”：新进程启动第一步就检查端口，旧进程此时还占着端口和显存，新进程会直接因端口冲突退出。
+- 模型加载期间也能重启/退出：`ProcessManager._wait_for_models` 发现 `is_alive` 变为 False 即返回，`start()` 随即进入 `_finish()`。
+- 托盘只在 Windows 上存在，因此“重启”只有 Windows 能触发；Linux 由 asmgt 负责重启。
 
 ### 识别流水线（`worker/pipeline.py`）
 
@@ -185,4 +194,5 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | 换模型 / 换量化版本 | `config_server.py` 的 `ModelPaths` + `core/server/model_download.py` 的 `PACKAGES`（压缩包名、SHA-256、大小），同步更新 `models/README.md` |
 | 升级 llama.cpp | `engines/llama/bin/`（两平台同版本）+ 核对 `engines/llama/llama.py` 的 ctypes 结构体，见 `bin/README.md` |
 | Linux 启动环境（解释器查找、库路径、asmgt 契约） | `start_server.sh`、`setup_linux.sh`、`requirements-linux.txt`、`docs/LINUX.md` |
-| 托盘 | `core/ui/tray.py`、`core/server/ui/tray_manager.py` |
+| 托盘菜单项 | `core/ui/tray.py`（`_TraySystem.__init__` 菜单构建、`on_restart` / `on_exit`）、`core/server/ui/tray_manager.py`（回调接线） |
+| 退出 / 重启流程 | `core/server/app.py`（`stop` / `restart` / `_finish`）、`core/server/launch.py`（`current_command` / `spawn_new_instance`）、`worker/process_manager.py`（`stop`） |

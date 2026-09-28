@@ -87,6 +87,36 @@ def apply_overrides() -> None:
         os.environ.setdefault('CUDA_DEVICE_ORDER', 'PCI_BUS_ID')
 
 
+def current_command() -> list:
+    """
+    启动当前进程所用的命令行（用于重启时原样再启动一次）。
+
+    必须在 CapsWriterServer 切换工作目录之前调用：非冻结模式下 argv[0] 可能是相对路径。
+    - Windows exe（冻结运行时）：[start_server.exe 绝对路径, 参数...]
+    - Python 入口：[解释器, start_server.py 绝对路径, 参数...]
+    """
+    if getattr(sys, 'frozen', False):
+        return [sys.executable] + sys.argv[1:]
+    return [sys.executable, os.path.abspath(sys.argv[0])] + sys.argv[1:]
+
+
+def spawn_new_instance(cmd: list) -> None:
+    """
+    用给定命令行启动一个新的服务端进程（重启的后半步）。
+
+    调用前必须已经释放端口和识别子进程，否则新进程会因端口冲突直接退出。
+    Windows 上放进新的控制台窗口，效果与双击 exe 相同；旧控制台随当前进程退出而关闭。
+    环境变量随之继承（含命令行参数写回的 CAPSWRITER_*），新进程得到相同的配置。
+    """
+    import subprocess
+    kwargs = {}
+    if sys.platform == 'win32':
+        kwargs['creationflags'] = subprocess.CREATE_NEW_CONSOLE
+    else:
+        kwargs['start_new_session'] = True
+    subprocess.Popen(cmd, **kwargs)
+
+
 def is_interactive() -> bool:
     """是否运行在可交互的终端里（双击 exe / 手动在终端运行）；被服务管理器托管时为 False"""
     try:

@@ -34,7 +34,8 @@ class TrayManager:
         if enable_min_to_tray(
             'CapsWriter Server',
             icon_path,
-            exit_callback=self._request_exit
+            exit_callback=self._request_exit,
+            restart_callback=self._request_restart,
         ):
             logger.info("托盘图标已启用")
 
@@ -42,6 +43,11 @@ class TrayManager:
         """托盘图标引用的退出回调"""
         logger.info("托盘退出: 用户点击退出菜单，准备清理资源并退出")
         self.app.stop()
+
+    def _request_restart(self, icon=None, item=None):
+        """托盘图标引用的重启回调：等同于“退出”后再手动启动一次（见 CapsWriterServer.restart）"""
+        logger.info("托盘重启: 用户点击重启菜单，准备重启服务端")
+        self.app.restart()
 
     def stop(self):
         """停止托盘图标"""
