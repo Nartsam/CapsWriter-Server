@@ -4,6 +4,9 @@
 # Shell 脚本在任何平台检出都必须是 LF，否则 Linux 上 bash 会报 $'\r' 错误
 *.sh text eol=lf
 
+# internal/ 是冻结运行时，必须逐字节原样保存，任何文件都不做换行转换
+internal/** -text
+
 # 二进制
 *.exe binary
 *.dll binary

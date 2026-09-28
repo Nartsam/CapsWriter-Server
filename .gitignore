@@ -1,6 +1,7 @@
 # ---- Python 缓存 ----
 __pycache__/
-*.py[cod]
+# 注意不要写成常见模板里的 *.py[cod]：那会把 internal/ 中的 .pyd 扩展模块一起忽略掉
+*.py[co]
 # internal/ 是 start_server.exe 的 PyInstaller 冻结运行时，里面的 .pyc 就是标准库/依赖本体，必须跟踪
 !internal/**/*.pyc
 
