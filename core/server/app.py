@@ -15,6 +15,7 @@ from config_server import ServerConfig as Config, __version__
 from .state import ServerState, console
 from core.tools.signal_handler import register_signal
 from .worker.process_manager import ProcessManager
+from .worker.check_model import check_model
 from .connection.server_manager import SocketManager
 from .ui.tray_manager import TrayManager
 from . import launch
@@ -114,11 +115,13 @@ class CapsWriterServer:
 
         self._print_banner()
 
-        # 先确认端口可用，再花时间加载模型（托盘会隐藏控制台窗口，所以也要在托盘之前）
+        # 先确认端口可用、模型齐全，再花时间加载模型。
+        # 这两步都可能需要用户看提示/回答问题，而托盘会隐藏控制台窗口，所以必须在托盘之前。
         if not self.socket_manager.check_port_available():
             self.is_alive = False
             launch.pause_before_exit()
             sys.exit(1)
+        check_model()
 
         # 托盘图标
         self.tray_manager.start()

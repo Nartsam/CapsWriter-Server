@@ -12,7 +12,6 @@ from multiprocessing import Process, Manager
 from typing import TYPE_CHECKING
 from ..state import console
 from . import start_worker
-from .check_model import check_model
 from . import logger
 if TYPE_CHECKING:
     from ..app import CapsWriterServer
@@ -40,10 +39,7 @@ class ProcessManager:
         if self.is_alive: return
         self.is_alive = True
 
-        # 1. 前置检查
-        check_model()
-
-        # 2. 初始化共享资源
+        # 1. 初始化共享资源（模型文件已由 CapsWriterServer.start() 预先检查）
         # 使用 Manager 管理共享列表，用于追踪活动连接
         state = self.app.state
         state.sockets_id = Manager().list()
@@ -51,7 +47,7 @@ class ProcessManager:
         # 获取标准输入文件描述符，用于 Windows 下的信号传递补丁
         stdin_fn = sys.stdin.fileno()
         
-        # 3. 创建并启动进程
+        # 2. 创建并启动进程
         self._process = Process(
             target=start_worker,
             args=(state.queue_in,
@@ -66,7 +62,7 @@ class ProcessManager:
         state.recognize_process = self._process
         logger.info(f"识别子进程已拉起 (PID: {self._process.pid})")
 
-        # 4. 等待模型加载完成 (轮询方式)
+        # 3. 等待模型加载完成 (轮询方式)
         self._wait_for_models()
         
         return self._process
