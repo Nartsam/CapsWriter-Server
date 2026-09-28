@@ -4,7 +4,8 @@
 # Shell 脚本在任何平台检出都必须是 LF，否则 Linux 上 bash 会报 $'\r' 错误
 *.sh text eol=lf
 
-# 批处理在任何平台检出都保持 CRLF（cmd 解析 LF 换行的 .bat 有已知问题）
+# 批处理在任何平台检出都保持 CRLF（cmd 解析 LF 换行的 .bat 有已知问题）；
+# 内容保持纯 ASCII：cmd 按控制台代码页（GBK）解析，UTF-8 中文会让解析出错
 *.bat text eol=crlf
 
 # internal/ 是冻结运行时，必须逐字节原样保存，任何文件都不做换行转换

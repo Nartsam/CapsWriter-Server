@@ -1,6 +1,6 @@
 # Linux 部署与运维
 
-Linux 入口是 `start_server.sh`，它只准备运行环境（找 Python、设动态库路径），然后执行 `start_server.py`——内容与 `start_server.exe` 内嵌的脚本相同，都是 `CapsWriterServer().start()`。命令行参数、环境变量、端口与模型检查都在这段共用代码里，所以 **Linux 与 Windows 的参数和行为完全一致**。平台差异只有 `config_server.py` 中 ONNX 推理后端的默认值（Linux 为 CUDA，见 [显卡加速.md](显卡加速.md)）以及托盘图标（Linux 自动跳过）。
+Linux 入口是 `start_server.sh`：它只准备运行环境（找 Python、设动态库路径），然后执行 `start_server.py`，与 Windows 的 `start_server.exe` 走同一段代码，参数和行为一致（两个平台的不同之处见 [PROJECT_INDEX.md](../PROJECT_INDEX.md#平台差异)）。
 
 ## 前置条件
 
@@ -25,7 +25,7 @@ git clone <仓库地址> capswriter && cd capswriter
 
 ## 启动参数
 
-`--host` / `--port` / `--gpu` / `--download-models`，以及对应的 `CAPSWRITER_*` 环境变量，完整说明见 [PROJECT_INDEX.md](../PROJECT_INDEX.md#启动参数与环境变量)。优先级：命令行 > 环境变量 > `config_server.py`。
+与 Windows 相同（`--host` / `--port` / `--gpu` / `--download-models` 及对应的 `CAPSWRITER_*` 环境变量），完整说明见 [PROJECT_INDEX.md](../PROJECT_INDEX.md#启动参数与环境变量)。
 
 ## 接入 asmgt（服务管理）
 

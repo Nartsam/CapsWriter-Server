@@ -4,15 +4,7 @@
 
 两个入口最终都执行 CapsWriterServer().start()（Windows：start_server.exe 的内嵌脚本；
 Linux：start_server.sh → start_server.py），start() 第一步就调用这里，
-因此两边支持完全相同的参数与环境变量：
-
-  命令行参数           环境变量                    作用
-  --host ADDR         CAPSWRITER_HOST             监听地址
-  --port N            CAPSWRITER_PORT             监听端口
-  --gpu N             CAPSWRITER_GPU              只使用第 N 张 GPU（nvidia-smi 编号）
-                      CAPSWRITER_ONNX_PROVIDER    覆盖 ONNX 推理后端：CPU / CUDA / DML
-  --download-models                               下载/补全模型后退出
-
+因此两边支持完全相同的参数与环境变量（一览见 PROJECT_INDEX.md「启动参数与环境变量」）。
 优先级：命令行 > 环境变量 > config_server.py。
 
 命令行参数会写回对应的环境变量。识别子进程在 Windows 上以 spawn 方式启动、会重新

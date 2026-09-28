@@ -237,6 +237,8 @@ class QwenForcedAligner:
         # 2. 加载对齐 LLM
         self.model = llama.LlamaModel(llm_gguf, n_gpu_layers=-1, use_gpu=config.llm_use_gpu)
         self.embedding_table = llama.get_token_embeddings_gguf(llm_gguf)
+        # n_batch 取 n_ctx：对齐输入一次性整段送入（最长约 3072 token），默认的 2048 放不下。
+        # 这是对齐器与识别器（asr.py）共用本推理内核时唯一的差异
         self.ctx = llama.LlamaContext(self.model, n_ctx=config.n_ctx, n_batch=config.n_ctx, embeddings=False)
         
         self.processor = AlignerProcessor()

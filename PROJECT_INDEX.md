@@ -1,30 +1,28 @@
 # CapsWriter-Server 项目索引
 
-> 面向 AI Agent 的项目入口文档。改代码前先读这里，再按需读相关源文件。
-> 行为变更后必须同步更新本文档对应章节；跨会话的决策、待办、已知问题记在 [docs/DEV_NOTES.md](docs/DEV_NOTES.md)。
+> 项目地图：模块在哪、怎么协作、跨模块的约束与平台差异、改什么动哪里。
+> 这里不逐步复述代码，也不记历史与测试记录；硬性约束、验证步骤与文档分工见 [CLAUDE.md](CLAUDE.md)。
 
 ## 项目概览
 
 CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) v2.5，MIT）。上游把客户端和服务端放在一起，这里拆成了两个仓库，本仓库**只做服务端**，仅供仓库主人自用：
 
-- **CapsWriter-Client**（`../CapsWriter-Client`，另一个仓库，本仓库不改它）：按住快捷键录音 → 通过 WebSocket 把音频发给服务端 → 拿到文字后做热词替换、LLM 润色并模拟键盘上屏。
+- **CapsWriter-Client**（`../CapsWriter-Client`）：按住快捷键录音 → 通过 WebSocket 把音频发给服务端 → 拿到文字后做热词替换、LLM 润色并模拟键盘上屏。
 - **CapsWriter-Server**（本仓库）：WebSocket 服务，收音频、用 **Qwen3-ASR-1.7B** 识别、返回文字；文件转录任务额外用 **Qwen3-ForcedAligner** 生成字级时间戳。
-
-服务端要在两个平台上运行，**两套入口、一份代码、行为一致**：
 
 | 平台 | 入口 | Python 运行时 | 用途 |
 |---|---|---|---|
 | Windows 10/11 | `start_server.exe`（双击，最小化到托盘） | `internal/`：上游打包好的 Python 3.13 冻结运行时 | 本机日常使用 |
-| Linux + NVIDIA | `start_server.sh` → `start_server.py` | `setup_linux.sh` 建的 conda/venv 环境（Python ≥ 3.10） | 服务器，由 asmgt 托管 |
+| Linux + NVIDIA | `start_server.sh` → `start_server.py` | `setup_linux.sh` 建的 conda/venv 环境（Python ≥ 3.10） | 服务器，由 asmgt 托管（见 [docs/LINUX.md](docs/LINUX.md)） |
 
-两个入口最终都只执行 `CapsWriterServer().start()`；命令行参数、环境变量、端口与模型检查全部在这段共用代码里，平台差异只在 `config_server.py` 里显式写出（ONNX 推理后端默认值）和托盘（仅 Windows）。
+两个入口都只执行 `CapsWriterServer().start()`，其余代码全部共用；两个平台的不同之处全部列在下文「平台差异」。
 
 ---
 
 ## 目录结构
 
 ```
-├── start_server.exe          # Windows 入口：PyInstaller 启动器（见“两个入口”），不要改、无法重建
+├── start_server.exe          # Windows 入口：PyInstaller 启动器（见“Windows 运行时”），无法重建
 ├── start_server.py           # Linux/开发入口：内容与 exe 内嵌脚本完全相同
 ├── start_server.sh           # Linux 启动脚本：找 Python、设 LD_LIBRARY_PATH，exec start_server.py（兼容 asmgt）
 ├── setup_linux.sh            # Linux 环境安装（conda/venv + requirements-linux.txt + 自检）
@@ -32,15 +30,15 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 ├── download_models.sh        # 下载模型（Linux）= ./start_server.sh --download-models
 ├── requirements-linux.txt    # Linux 依赖（Windows 的依赖在 internal/ 里）
 ├── config_server.py          # 唯一的配置文件（两平台共用）
-├── internal/                 # Windows 冻结运行时：Python 3.13 标准库 .pyc + 第三方库（已剔除客户端依赖）
+├── internal/                 # Windows 冻结运行时：Python 3.13 标准库 .pyc + 第三方库
 ├── core/
 │   ├── __init__.py           # colorama 初始化，导出 logger 工具
-│   ├── constants.py          # 音频格式常量（16kHz、float32、单声道）、标点集合 —— 与 Client 仓库同名文件保持一致
-│   ├── protocol.py           # C/S 通信协议（AudioMessage / RecognitionMessage）—— 与 Client 仓库同名文件保持一致
+│   ├── constants.py          # 音频格式常量（16kHz、float32、单声道）、标点集合 —— 与 Client 仓库逐字相同
+│   ├── protocol.py           # C/S 通信协议（AudioMessage / RecognitionMessage）—— 与 Client 仓库逐字相同
 │   ├── logger.py             # 日志：文件按 log_level 记录（logs/server_latest.log，超 10MB 截断），控制台只打 WARNING+
 │   ├── server/               # ======= 服务端 =======
-│   │   ├── app.py            # CapsWriterServer 门面类，唯一入口 start()
-│   │   ├── launch.py         # 命令行参数 / 环境变量 → 覆盖配置；交互终端判断
+│   │   ├── app.py            # CapsWriterServer 门面类：start() / stop() / restart()
+│   │   ├── launch.py         # 命令行参数 / 环境变量 → 覆盖配置；交互终端判断；重启时拉起新实例
 │   │   ├── state.py          # ServerState（主进程）/ WorkerState（子进程）、rich console
 │   │   ├── schema.py         # Task / Result / RecognitionSession
 │   │   ├── runtime_status.py # logs/server_status.json 忙闲状态（跨进程文件锁）
@@ -53,14 +51,14 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 │   │   │   └── llama/                # llama.cpp 的 ctypes 绑定 llama.py + 两平台运行库 bin/（见 bin/README.md）
 │   │   ├── formatter/        # TextFormatter：中文数字 ITN、中英文空格
 │   │   ├── merger/           # 分段结果拼接（见 docs/text_merge_algorithm.md）
-│   │   └── ui/tray_manager.py# 托盘管理
+│   │   └── ui/tray_manager.py# 托盘管理（菜单回调接到 app 的 stop / restart）
 │   ├── tools/                # chinese_itn、format_tools、token_sync、signal_handler、daemon_executor、
 │   │                         # asyncio_to_thread、empty_working_set（Windows 内存回收）、my_status（rich 状态动画）
-│   └── ui/tray.py            # 系统托盘：显示/隐藏、重启、退出（仅 Windows；其他平台 enable_min_to_tray 直接跳过）
+│   └── ui/tray.py            # 系统托盘：显示/隐藏、重启、退出
 ├── models/                   # 模型（不进 git，见 models/README.md）
 ├── tools/smoke_test.py       # 冒烟测试客户端（仅标准库）+ assets/demo.wav
 ├── assets/icon.ico           # 托盘图标
-├── docs/                     # LINUX.md、显卡加速.md、text_merge_algorithm.md、DEV_NOTES.md
+├── docs/                     # 专题文档与开发笔记（清单见 CLAUDE.md 的阅读顺序）
 └── logs/                     # 运行时生成：server_latest.log、server_status.json（不进 git）
 ```
 
@@ -74,7 +72,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 |---|---|
 | 主进程 | asyncio 事件循环 + WebSocket 服务（`connection/`）、托盘、信号处理 |
 | Manager 进程 | `multiprocessing` 的 `SyncManager`，只托管一个跨进程列表 `sockets_id`（当前在线连接），子进程靠它判断任务的客户端是否已断开 |
-| 识别子进程 | 加载模型并串行处理任务（`worker/`）。只有它 import onnxruntime / llama.cpp，所以 GPU 相关环境变量必须在它启动前设好 |
+| 识别子进程 | 加载模型并串行处理任务（`worker/`）；只有它 import onnxruntime / llama.cpp |
 
 数据流：
 
@@ -84,32 +82,46 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
    ─▶ queue_out ─▶ ws_send ──RecognitionMessage(JSON)──▶ Client
 ```
 
-### 启动流程（`CapsWriterServer.start()`）
+### 启动顺序的约束（`app.py` 的 `start()`）
 
-1. `launch.parse_args()` → `export_args()`（参数写回环境变量）→ `apply_overrides()`（环境变量覆盖 `config_server` 的类属性，`--gpu` 设置 GPU 可见性变量）
-2. `--download-models`：下载/补全模型后退出
-3. 注册信号：SIGINT（1 秒内按两次退出）、SIGTERM / SIGHUP（立即退出）。子进程（识别子进程、Manager）会把 SIGTERM/SIGHUP 恢复为默认处理，并在主进程消失后自行退出——Linux 的 fork 会继承这些处理函数，不恢复会出错
-4. 打印横幅；**检查端口**，被占用则退出码 1（交互终端里等回车再退）
-5. `check_model()`：缺必需模型 → 交互终端询问是否立即下载，否则退出码 1；只缺对齐模型 → 提示后继续。第 4、5 步可能需要用户看提示，所以必须在托盘隐藏控制台之前
-6. 启动托盘（Windows 且有控制台窗口时才生效，会隐藏控制台）
-7. `runtime_status.initialize()` 重置忙闲状态文件
-8. `ProcessManager.start()`：建 Manager 列表 → 拉起识别子进程 → 阻塞等待子进程发来“模型已加载”（子进程先调用 `apply_overrides()`，因为 Windows 的 spawn 会重新 import 配置）；子进程加载失败则退出码 1
-9. `SocketManager.start()`：`websockets.serve`，主线程进入 `ws_send` 发送循环直到退出
-10. `_finish()`：`start()` 的唯一出口（`sys.exit`），有重启请求时在这里拉起新实例
+具体顺序看代码；调整时要保持这些前后关系：
 
-### 退出与重启（托盘菜单）
+- 参数与环境变量覆盖（`launch.py`）最先执行，之后的一切都读 `config_server`。
+- 端口检查、模型检查在托盘之前：两者都可能需要用户看提示或回答问题，而托盘会隐藏控制台窗口。
+- GPU 相关环境变量必须在识别子进程启动前设好。Windows 的子进程会重新 import 配置，所以子进程里要再调用一次 `apply_overrides()`。
+- 识别子进程加载完模型后，WebSocket 才开始监听。
+- `start()` 只从 `_finish()` 退出：退出码与重启都在那里统一处理。
 
-- **退出**：`TrayManager._request_exit` → `CapsWriterServer.stop()`：通知 `ws_send` 结束 → 关闭 WebSocket（释放端口）→ 结束识别子进程（先发 `None` 让它优雅退出，2 秒不退就 terminate 并等待其结束）→ 卸载托盘 → 停止事件循环。
-- **重启**（2026-09-28 新增，菜单项位置与 Client 一致）：`TrayManager._request_restart` → `CapsWriterServer.restart()` 置重启标志后执行与“退出”完全相同的 `stop()`；主线程走到 `_finish()` 时先等 `stop()` 全部完成（识别子进程真正退出、显存释放），再用 `launch.spawn_new_instance()` 以**启动当前进程时的同一条命令行**（`launch.current_command()`，在 `__init__` 切换目录前记录；exe 为 `[start_server.exe, 参数...]`）拉起新进程，然后退出。Windows 上新进程放在新控制台窗口里（`CREATE_NEW_CONSOLE`），效果等同于双击 exe；环境变量随之继承，命令行参数与 `CAPSWRITER_*` 覆盖都保持不变。
-- 为什么不像 Client 那样“先拉起新进程再退出”：新进程启动第一步就检查端口，旧进程此时还占着端口和显存，新进程会直接因端口冲突退出。
-- 模型加载期间也能重启/退出：`ProcessManager._wait_for_models` 发现 `is_alive` 变为 False 即返回，`start()` 随即进入 `_finish()`。
-- 托盘只在 Windows 上存在，因此“重启”只有 Windows 能触发；Linux 由 asmgt 负责重启。
+### 退出与重启
+
+- **退出**（托盘菜单、SIGTERM/SIGHUP、1 秒内两次 Ctrl+C）都走 `CapsWriterServer.stop()`：关闭 WebSocket（释放端口）→ 结束识别子进程并等它退出 → 卸载托盘 → 停止事件循环。
+- **重启**（托盘菜单，仅 Windows）：执行同一个 `stop()`，完成后由 `_finish()` 用原命令行拉起新实例。必须先退出再启动，原因见 `app.py` 的 `restart()`。Linux 的重启交给 asmgt。
+- 识别子进程和 Manager 进程在主进程消失后会自行退出，不残留、不占显存（`core/tools/signal_handler.py`）。
 
 ### 识别流水线（`worker/pipeline.py`）
 
 每个片段：float32 字节 → numpy（< 0.1s 的空片段直接跳过）→ `QwenASREngine.decode_stream`（ONNX 编码器 → 拼 prompt embedding → llama.cpp 解码，温度 0.4、异常时升温重试，**同一段音频多次识别结果可能有细微差异**）→ `merge_by_text` 累积 `text`。
-文件任务（`source == 'file'`）且模型不带时间戳时，调用 `ManagedAlignerProxy.align` 得到字级时间戳（首次使用时加载，闲置 `aligner_idle_timeout` 秒后卸载）→ `merge_tokens_by_sequence_matcher` 累积 tokens/timestamps。
+文件任务（`source == 'file'`）调用 `ManagedAlignerProxy.align` 得到字级时间戳（首次使用时加载，闲置 `aligner_idle_timeout` 秒后卸载）→ `merge_tokens_by_sequence_matcher` 累积 tokens/timestamps。
 最后一段：`TextFormatter.format`（ITN、中英空格）→ `sync_tokens_from_text` 把格式化结果同步回 tokens → 若无 tokens（麦克风任务）按字数均分时长生成时间戳。
+
+---
+
+## 平台差异
+
+这是完整清单：平台相关的分支都要显式写在代码里，并加进这张表。
+
+| 差异 | 位置 | Windows | Linux |
+|---|---|---|---|
+| ONNX 推理后端默认值 | `config_server.py` 的 `_DEFAULT_ONNX_PROVIDER` | `CPU`（onnxruntime-directml，另可选 `DML`） | `CUDA`（onnxruntime-gpu），原因见 [显卡加速.md](docs/显卡加速.md) |
+| 托盘与“重启”菜单 | `core/ui/tray.py` | 有 | 自动跳过 |
+| 子进程启动方式 | `multiprocessing` 默认值 | spawn：重新 import 配置，需再覆盖一次 | fork：会继承主进程的信号处理，子进程需恢复默认 |
+| 识别子进程内存回收 | `worker/worker.py` → `empty_working_set` | 模型加载后清空工作集 | 无 |
+| 端口检查的 `SO_REUSEADDR` | `connection/server_manager.py` | 不设（Windows 上设了会检查不出冲突） | 设 |
+| 状态文件锁 | `runtime_status.py` | `msvcrt` | `fcntl` |
+| llama.cpp 运行库 | `engines/llama/llama.py` | `.dll` | `.so` |
+| 交互终端判断 | `launch.is_interactive` | `isatty` + `GetConsoleMode`（排除重定向到 NUL） | `isatty` |
+| 重启时的新进程 | `launch.spawn_new_instance` | 新控制台窗口 | 新会话（Linux 没有托盘，实际不会触发） |
+| 缺模型时提示的下载命令 | `worker/check_model.py` | `download_models.bat` | `./download_models.sh` |
 
 ---
 
@@ -137,43 +149,41 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | 类 | 内容 |
 |---|---|
 | `ServerConfig` | `addr`、`port`（字符串）、`format_num`（中文数字转阿拉伯数字）、`format_spell`（中英空格）、`enable_tray`、`log_level`、`aligner_idle_timeout` |
-| `ModelPaths` | 模型文件路径（相对项目根目录；启动时 `CapsWriterServer.__init__` 会 chdir 到项目根） |
+| `ModelPaths` | 模型文件路径（相对项目根目录；`CapsWriterServer.__init__` 会 chdir 到项目根） |
 | `ModelDownload` | `base_url`：模型压缩包下载地址前缀（可换镜像） |
 | `Qwen3ASRGGUFArgs` | 识别引擎参数，**所有公开属性会原样作为关键字参数传给 `ASREngineConfig`**，新增属性必须同时是该 dataclass 的字段（辅助变量用下划线开头） |
 | `ForceAlignerGGUFArgs` | 对齐引擎参数，同上，对应 `AlignerConfig` |
-
-唯一的平台差异：`_DEFAULT_ONNX_PROVIDER = 'CPU' if sys.platform == 'win32' else 'CUDA'`（原因见 [docs/显卡加速.md](docs/显卡加速.md)）。
 
 ---
 
 ## 通信协议（`core/protocol.py`）
 
-**与 Client 仓库的 `core/protocol.py`、`core/constants.py` 逐字相同，修改协议必须两边同步。**
+字段定义看 `protocol.py`（与 Client 仓库逐字相同）。不看代码不容易知道的几点：
 
-- 客户端 → 服务端 `AudioMessage`（JSON 文本帧）：`task_id`、`source`（`mic` / `file`）、`data`（base64 的 float32 16kHz 单声道 PCM）、`is_final`、`time_start`、`seg_duration`（默认 15，客户端实际发 60）、`seg_overlap`（默认 2，客户端实际发 4）、`context`（作为 Qwen3 的 system prompt）、`language`（统一语言代码，见 `engines/language.py`，`auto` 表示不指定）
-- 服务端 → 客户端 `RecognitionMessage`：`task_id`、`is_final`、`duration`、`time_start/submit/complete`、`text`（主输出）、`text_accu`、`tokens`、`timestamps`
-- WebSocket 子协议 `binary`，`max_size=None`；每个完成的片段都会回一条（`is_final=False`），最后一条 `is_final=True`
-- 结果只发回提交任务的那个连接；连接断开后，其未处理任务会被子进程丢弃
-
----
-
-## 两个入口的实现细节
-
-- **`start_server.exe`** 是 PyInstaller 6 的启动器，内嵌脚本等价于 `start_server.py`，再加一个把 exe 所在目录插入 `sys.path` 的钩子。它不包含任何项目代码：`core/`、`config_server.py` 都从源码目录实时加载，**改完代码重启 exe 即生效**。第三方库与标准库全部来自 `internal/`（Python 3.13，`.pyc`/`.pyd`）。exe 本身无法在本仓库重建，也不需要重建。
-- `internal/` 只能“减”不能随意“加”：纯 Python 包可以直接把源码目录拷进 `internal/`；带 C 扩展的包必须是 cp313-win_amd64 版本。能用标准库就不要引入新依赖。PyInstaller 的运行时钩子会检查 `internal/_tcl_data`、`_tk_data` 是否存在，**这两个目录不能删**。
-- **Linux** 用 `requirements-linux.txt` 的 pip 包，需要和 `internal/` 里的库在 API 层面兼容（目前 numpy 2.x、websockets 16、onnxruntime 1.23、gguf、rich、colorama）。
-- 代码必须同时兼容 **Python 3.10（Linux）与 3.13（Windows）**：不要用 3.11+ 才有的语法/标准库（如 `tomllib`、`except*`、`typing.Self`）。
-- 平台相关的分支必须显式写（`sys.platform == 'win32'` / `os.name == 'posix'`），并在本文档记录。目前有：ONNX 后端默认值、托盘（仅 Windows）、`empty_working_set`（仅 Windows）、端口检查的 `SO_REUSEADDR`（仅 POSIX）、状态文件锁（fcntl / msvcrt）、`llama.py` 加载 `.dll` / `.so`。
+- 客户端发 `AudioMessage`（JSON 文本帧），`data` 是 base64 编码的 float32 16kHz 单声道 PCM。
+- `seg_duration` / `seg_overlap` 的协议默认值是 15 / 2，但客户端实际发 60 / 4；分段在服务端 `ws_recv` 里做（见 [text_merge_algorithm.md](docs/text_merge_algorithm.md)）。
+- `context` 作为 Qwen3 的 system prompt；`language` 是统一语言代码（见 `engines/language.py`），`auto` 表示不指定。
+- 服务端每完成一个片段就回一条 `RecognitionMessage`（`is_final=False`），最后一条 `is_final=True`；主输出是 `text`，文件转录用 `tokens` / `timestamps`。
+- WebSocket 子协议 `binary`，`max_size=None`。结果只发回提交任务的那个连接；连接断开后，其未处理的任务会被子进程丢弃。
 
 ---
 
-## 开发环境与验证
+## Windows 运行时（`start_server.exe` 与 `internal/`）
 
-- **语法检查**：`python -c "import ast; ..."` 用 `ast.parse`，不要用 `py_compile`（会生成 `__pycache__`）。系统 Python 通常没有项目依赖，不能直接 `import core`。
-- **Windows 实机验证**：改完代码 → `start_server.exe --port 6100`（换个端口，避免和正在使用的实例冲突）→ 另开终端 `python tools/smoke_test.py --port 6100`。
-- **Linux 验证**：在 Linux 服务器上 `./start_server.sh --port 6100` + `python3 tools/smoke_test.py --port 6100`。**不要在 Windows 开发机的 WSL 里测试**（用户要求，曾占满 C 盘）；在 Windows 上改了 Linux 相关代码时，做静态检查（`ast.parse(..., feature_version=(3, 10))`、`bash -n`），并把需要真机验证的项写进 docs/DEV_NOTES.md 的“待验证”。
-- **`tools/smoke_test.py`**：只依赖标准库，模拟客户端发送 `tools/assets/demo.wav`（16.5 秒新闻播报）。常用参数：`--source file`（触发对齐模型，输出的时间戳范围应接近 0.3~16.3s 而非 0~16.2s 的均分值）、`--seg-duration 6 --seg-overlap 2`（强制多段，测试拼接）、`--expect 子串`、`--json`、`--host`（测远程服务器）。期望结果约为“财联社1月7日电，从国家邮政局了解到，十四五以来，我国建成世界上规模最大、受益人数最多的寄递网络，邮政快递业业务年均增长10%。”（采样有随机性，标点可能略有差异）。
-- **提交规范**：`__pycache__`、`models/`、`logs/` 不进仓库；`internal/` 按字节原样跟踪（`.gitattributes` 已设 `-text`）；Linux `.so` 的别名是 git 符号链接，在 Windows 上表现为小文本文件，**不要用普通文件覆盖它们**；`.sh` 必须是 LF 且带可执行位（Windows 上用 `git update-index --chmod=+x`）。
+- **`start_server.exe`** 是 PyInstaller 6 的启动器，内嵌脚本等价于 `start_server.py`，外加一个把 exe 所在目录插入 `sys.path` 的钩子。它不包含任何项目代码：`core/`、`config_server.py` 都从源码目录实时加载，**改完代码重启 exe 即生效**。
+- **`internal/`** 提供全部第三方库与标准库（Python 3.13，`.pyc` / `.pyd`）。已按真实运行时的导入追踪删掉未用到的客户端依赖（清单见提交 95469b6）。要加包：纯 Python 包可以直接把源码目录拷进来，带 C 扩展的必须是 cp313-win_amd64 版本。`requests`、`tqdm`、`yaml` 是 gguf 声明的依赖，没被导入也要保留；`_tcl_data`、`_tk_data` 会被 PyInstaller 的运行时钩子检查，**不能删**。
+- **Linux** 用 `requirements-linux.txt` 的 pip 包，版本要和 `internal/` 里的库在 API 层面兼容（目前 numpy 2.x、websockets 16、onnxruntime 1.23、gguf、rich、colorama）。
+
+---
+
+## 冒烟测试（`tools/smoke_test.py`）
+
+只依赖标准库，模拟客户端发送 `tools/assets/demo.wav`（16.5 秒新闻播报），可以对任意主机测试（`--host`）。
+
+- 预期结果大致是“财联社1月7日电，从国家邮政局了解到，十四五以来，我国建成世界上规模最大、受益人数最多的寄递网络，邮政快递业业务年均增长10%。”。解码是采样的，标点和个别字可能不同，所以用 `--expect 子串` 检查稳定的部分。
+- `--source file`：触发对齐模型。时间戳范围应接近 0.3~16.3s；如果是 0~16.2s 的均分值，说明对齐模型没有生效。
+- `--seg-duration 6 --seg-overlap 2`：强制切成多段，用来测试拼接。
+- `--json`：输出原始结果。
 
 ---
 
@@ -182,7 +192,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | 修改目标 | 涉及文件 |
 |---|---|
 | 默认端口、日志级别、数字/空格格式化开关 | `config_server.py` 的 `ServerConfig` |
-| 新增启动参数 / 环境变量 | `core/server/launch.py`（`parse_args` / `export_args` / `apply_overrides`），并更新本文档“启动参数与环境变量”和 `docs/LINUX.md` |
+| 新增启动参数 / 环境变量 | `core/server/launch.py`（`parse_args` / `export_args` / `apply_overrides`），并更新本文档“启动参数与环境变量”；影响 Linux 部署的同步 `docs/LINUX.md` |
 | ONNX 后端、GPU 加速开关 | `config_server.py` 的 `*Args.onnx_provider` / `llm_use_gpu`；Provider 选择逻辑在 `engines/qwen_asr_gguf/inference/encoder.py` |
 | Qwen3 解码参数（温度、prompt 结构、上下文长度） | `engines/qwen_asr_gguf/asr_engine.py`（`decode_stream`）、`inference/asr.py`（`_build_prompt_embd` / `_decode`）、`config_server.py` 的 `n_ctx` / `chunk_size` |
 | 语言代码映射 | `engines/language.py` |

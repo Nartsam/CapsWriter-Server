@@ -21,13 +21,7 @@ Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWrite
 
 ### Linux（NVIDIA 显卡）
 
-```bash
-./setup_linux.sh                     # 创建 Python 环境并安装依赖
-./download_models.sh                 # 下载模型
-./start_server.sh --port 6000 --gpu 0
-```
-
-详见 [docs/LINUX.md](docs/LINUX.md)（含 asmgt 托管与从旧部署迁移）。
+安装环境 → 下载模型 → 启动，见 [docs/LINUX.md](docs/LINUX.md)（含 asmgt 托管与从旧部署迁移）。
 
 ## 配置与启动参数
 
@@ -37,7 +31,7 @@ Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWrite
 start_server.exe / ./start_server.sh  [--host ADDR] [--port N] [--gpu N] [--download-models]
 ```
 
-或使用环境变量 `CAPSWRITER_HOST` / `CAPSWRITER_PORT` / `CAPSWRITER_GPU` / `CAPSWRITER_ONNX_PROVIDER`，说明见 [PROJECT_INDEX.md](PROJECT_INDEX.md#启动参数与环境变量)。
+也可以用对应的 `CAPSWRITER_*` 环境变量，完整说明见 [PROJECT_INDEX.md](PROJECT_INDEX.md#启动参数与环境变量)。
 
 客户端连接地址：`ws://<服务端IP>:<端口>`（在 Client 仓库的 `config_client.py` 中配置）。
 
