@@ -1,0 +1,21 @@
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+# internal/ 是 start_server.exe 的 PyInstaller 冻结运行时，里面的 .pyc 就是标准库/依赖本体，必须跟踪
+!internal/**/*.pyc
+
+# ---- 模型文件：不进 git，用 `start_server.exe --download-models` / `./start_server.sh --download-models` 获取 ----
+models/*
+!models/README.md
+
+# ---- 运行时产物 ----
+logs/
+
+# ---- Linux Python 环境（由 setup_linux.sh 创建） ----
+.conda-env/
+.venv/
+
+# ---- 编辑器 / 个人设置 ----
+.vscode/
+.idea/
+.claude/settings.local.json
