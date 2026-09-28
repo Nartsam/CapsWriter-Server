@@ -33,8 +33,8 @@ def tokens_to_text(tokens: List[str]) -> str:
     """
     将 tokens 序列化为最终显示文本
     
-    处理 Paraformer 特有的 @@ 标记（表示后续 token 应直接拼接）。
-    对于现代模型（如 Fun-ASR-Nano），空格本身通常已存在于 token 列表中。
+    去掉 @@ 连接标记（上游 Paraformer 引擎遗留，Qwen3-ASR 不产生，保留无害）。
+    空格本身通常已存在于 token 列表中。
     
     Args:
         tokens: token 列表

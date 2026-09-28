@@ -1,10 +1,9 @@
 """UI 工具模块
 
-提供 Toast 浮动消息通知和系统托盘功能。
-该模块设计为 Client 和 Server 共用，日志记录器通过注入方式加载。
+只剩系统托盘（tray.py，仅 Windows 生效，其他平台自动跳过）。
+日志记录器通过注入方式加载。
 """
 import logging
-from typing import Any
 
 # ============================================================
 # Logger 代理机制
@@ -37,16 +36,11 @@ def set_ui_logger(real_logger):
 # 导出组件
 # ============================================================
 
-from .toast import toast, toast_stream, ToastMessage, ToastMessageManager
 from .tray import enable_min_to_tray, stop_tray
 
 __all__ = [
     'logger',
     'set_ui_logger',
-    'toast',
-    'toast_stream',
-    'ToastMessage',
-    'ToastMessageManager',
     'enable_min_to_tray',
     'stop_tray',
 ]

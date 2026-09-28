@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 import numpy as np
 import onnxruntime as ort
+from . import logger
 
 
 class FastWhisperMel:
@@ -157,7 +158,16 @@ class QwenAudioEncoder:
         # 加载两个 Session
         self.sess_fe = ort.InferenceSession(frontend_path, sess_options=sess_opts, providers=providers)
         self.sess_be = ort.InferenceSession(backend_path, sess_options=sess_opts, providers=providers)
-        
+
+        # 请求的后端没装、或装了但运行库加载失败（如 Linux 缺 CUDA/cuDNN）时，ORT 会静默回退 CPU，这里显式报出来
+        wanted = {'CUDA': 'CUDAExecutionProvider', 'DML': 'DmlExecutionProvider',
+                  'TRT': 'TensorrtExecutionProvider', 'TENSORRT': 'TensorrtExecutionProvider'}.get(self.onnx_provider)
+        actual = self.sess_be.get_providers()[0]
+        if wanted and actual != wanted:
+            logger.warning(f"ONNX 推理后端 {self.onnx_provider} 不可用，已回退到 {actual}（ORT 可用后端：{available_providers}）")
+        else:
+            logger.info(f"ONNX 推理后端：{actual}（{os.path.basename(backend_path)}）")
+
         self.mel_extractor = FastWhisperMel()
         
         # 检测精度 (以前端为准)

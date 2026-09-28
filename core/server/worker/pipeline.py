@@ -30,15 +30,14 @@ class TaskPipeline:
     """
     语音识别处理流水线
     
-    统筹核心 ASR 引擎、标点模型和对齐器插件的协作。
+    统筹核心 ASR 引擎和对齐器插件的协作。
     基于任务源（mic/file）和引擎能力（Capabilities）自适应调整流水线深度。
     """
 
-    def __init__(self, recognizer, punc_model=None, aligner=None, state: WorkerState = None):
+    def __init__(self, recognizer, aligner=None, state: WorkerState = None):
         self.recognizer = recognizer
-        self.punc_model = punc_model
         self.aligner = aligner
-        self.formatter = TextFormatter(punc_model)
+        self.formatter = TextFormatter()
         self.state = state or WorkerState()
 
     def _process_simple_merge(self, result: Result, stream_result_text: str) -> None:

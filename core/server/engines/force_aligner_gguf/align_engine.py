@@ -2,8 +2,8 @@
 import numpy as np
 from typing import List, Optional
 
-from .inference.aligner import QwenForcedAligner as InternalAligner
-from .inference.schema import AlignerConfig, ForcedAlignResult
+from ..qwen_asr_gguf.inference.aligner import QwenForcedAligner as InternalAligner
+from ..qwen_asr_gguf.inference.schema import AlignerConfig, ForcedAlignResult
 from ..base import BaseAlignEngine
 from ..language import get_language, ENGINE_ALIGNER
 

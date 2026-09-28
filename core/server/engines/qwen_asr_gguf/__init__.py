@@ -1,9 +1,7 @@
 """
-FunASR-GGUF: 混合 ASR 推理引擎
+Qwen3-ASR-GGUF: 混合 ASR 推理引擎
 
-使用 ONNX Runtime (encoder/CTC) + llama.cpp (GGUF decoder) 进行语音识别
-
-API 兼容 sherpa-onnx，可直接替换使用。
+使用 ONNX Runtime (音频编码器) + llama.cpp (GGUF 解码器) 进行语音识别
 """
 
 import logging

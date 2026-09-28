@@ -45,7 +45,7 @@ class Logger:
         设置并返回一个日志记录器
 
         Args:
-            name: 日志记录器名称（通常是 'server' 或 'client'）
+            name: 日志记录器名称（服务端统一用 'server'）
             log_dir: 日志文件目录，默认为项目根目录下的 logs 文件夹
             level: 日志级别，可选值：'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
             max_bytes: 单个日志文件最大大小，默认 10MB
@@ -80,8 +80,7 @@ class Logger:
 
         # 确定日志目录
         if log_dir is None:
-            from config_client import BASE_DIR
-            log_dir = os.path.join(BASE_DIR, 'logs')
+            log_dir = os.path.join(Path(__file__).resolve().parents[1], 'logs')
 
         # 创建日志目录
         Path(log_dir).mkdir(parents=True, exist_ok=True)
@@ -130,7 +129,7 @@ class Logger:
         """
         if name not in cls._loggers:
             # 如果 logger 还没有被初始化，先创建一个默认的（INFO 级别）
-            # 之后 core_client.py/core_server.py 会用正确的级别重新初始化
+            # 之后 core/server/__init__.py 会用 config_server 中的级别重新初始化
             return cls.setup(name, level='INFO')
         return cls._loggers[name]
 

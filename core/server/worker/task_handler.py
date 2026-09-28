@@ -9,12 +9,20 @@
 """
 
 from collections import OrderedDict, deque
+import multiprocessing
 from multiprocessing import Queue
 from multiprocessing.managers import ListProxy
 import queue
 from .pipeline import TaskPipeline
 from ..state import WorkerState
+from .. import runtime_status
 from . import logger
+
+
+def _parent_alive() -> bool:
+    """主进程是否还活着（主进程被强杀时，子进程要自行退出，不能继续占着显存）"""
+    parent = multiprocessing.parent_process()
+    return parent is None or parent.is_alive()
 
 
 class TaskBuffer:
@@ -45,12 +53,15 @@ class TaskBuffer:
 
         return task
 
-    def cleanup_tasks(self):
-        """清理已断开连接的 session 的缓冲任务。"""
+    def cleanup_tasks(self) -> int:
+        """清理已断开连接的 session 的缓冲任务，返回丢弃的任务数。"""
+        removed = 0
         for tid in list(self._buffers):
             if tid not in self.state.sessions:
+                removed += len(self._buffers[tid])
                 logger.debug(f"清理断开连接的 session: {tid[:8]}")
                 del self._buffers[tid]
+        return removed
 
     @property
     def is_empty(self) -> bool:
@@ -71,18 +82,16 @@ class TaskHandler:
         self.state = state
 
         self.recognizer = None
-        self.punc_model = None
         self.aligner = None
         self.pipeline = None
 
         self.buffer = TaskBuffer(state)
 
-    def set_engine(self, recognizer, punc_model=None, aligner=None):
+    def set_engine(self, recognizer, aligner=None):
         """注入识别引擎实例并初始化管线"""
         self.recognizer = recognizer
-        self.punc_model = punc_model
         self.aligner = aligner
-        self.pipeline = TaskPipeline(recognizer, punc_model, aligner, self.state)
+        self.pipeline = TaskPipeline(recognizer, aligner, self.state)
 
     def drain_queue(self) -> bool:
         """Drain 队列中所有任务到缓冲区。Returns: False = 退出信号。"""
@@ -95,6 +104,9 @@ class TaskHandler:
                     task = self.queue_in.get(timeout=0.02)
             except queue.Empty:
                 if self.buffer.is_empty:
+                    if not _parent_alive():
+                        logger.warning("主进程已退出，识别子进程随之退出")
+                        return False
                     self.cleanup_engines()
                     continue
                 else:
@@ -109,6 +121,7 @@ class TaskHandler:
             # 跳过已断开连接客户端的任务
             if task.socket_id not in self.sockets_id:
                 logger.debug(f"跳过断连客户端任务: {task.task_id[:8]}")
+                runtime_status.task_abandoned()
                 continue
             
             # 任务进入缓冲区
@@ -117,7 +130,9 @@ class TaskHandler:
     def cleanup(self):
         """清理断连 socket 的缓冲任务和 session。"""
         self.state.cleanup_sessions(self.sockets_id)
-        self.buffer.cleanup_tasks()
+        removed = self.buffer.cleanup_tasks()
+        if removed:
+            runtime_status.task_abandoned(removed)
 
     def cleanup_engines(self):
         """时间戳引擎空闲时自动卸载。"""
@@ -143,11 +158,15 @@ class TaskHandler:
                 #     self.cleanup()
                 #     continue
 
-                result = self.pipeline.process(task)
-                self.queue_out.put(result)
-                if result.is_final:
-                    self.state.sessions.pop(task.task_id, None)
-                self.cleanup()
+                runtime_status.task_started()
+                try:
+                    result = self.pipeline.process(task)
+                    self.queue_out.put(result)
+                    if result.is_final:
+                        self.state.sessions.pop(task.task_id, None)
+                    self.cleanup()
+                finally:
+                    runtime_status.task_finished()
             except InterruptedError:
                 continue
             except Exception as e:

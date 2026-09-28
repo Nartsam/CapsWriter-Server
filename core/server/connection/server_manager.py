@@ -26,14 +26,20 @@ class SocketManager:
         self._is_running = False
         self._server = None  # websockets.serve 返回的 server 对象
 
-    def _check_port(self):
-        """检查端口可用性"""
+    def check_port_available(self) -> bool:
+        """检查端口可用性（启动时在加载模型之前调用）"""
+        import os
         import socket
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # 与 asyncio 建服务时的默认行为保持一致：仅 POSIX 设 SO_REUSEADDR，
+            # 让刚重启时处于 TIME_WAIT 的端口也能通过检查。
+            # Windows 上这个选项的语义是“允许抢占已被监听的端口”，设了反而检查不出冲突。
+            if os.name == 'posix':
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind((Config.addr, int(Config.port)))
                 return True
-            except socket.error:
+            except OSError:
                 logger.error(f"端口冲突：{Config.addr}:{Config.port} 已被占用，请检查是否已有服务端正在运行。")
                 return False
 
@@ -42,11 +48,6 @@ class SocketManager:
         启动 WebSocket 网络服务
         """
         if self._is_running: return
-        
-        # 0. 启动前自检环境
-        if not self._check_port():
-            input("\n按回车键退出...")
-            return 
 
         self._is_running = True
 

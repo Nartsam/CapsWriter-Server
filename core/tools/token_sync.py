@@ -221,7 +221,7 @@ def _tokenize_replacement(text: str) -> List[str]:
     """
     将替换文本按字符类型切分为 token
 
-    规则（与 ParaformerEngine._post_process_tokens 一致）：
+    规则（沿用上游 Paraformer 引擎的 token 切分规则）：
     - CJK 字符 → 单个 token
     - ASCII alnum 连续序列 → 一个 token
     - 其他字符（空格、标点） → 单个 token

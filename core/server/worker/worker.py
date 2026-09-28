@@ -72,8 +72,7 @@ class RecognizerWorker:
         
         # 3. 将加载好的引擎委派给处理器
         self.handler.set_engine(
-            recognizer=self.loader.recognizer, 
-            punc_model=self.loader.punc_model,
+            recognizer=self.loader.recognizer,
             aligner=self.loader.aligner
         )
         

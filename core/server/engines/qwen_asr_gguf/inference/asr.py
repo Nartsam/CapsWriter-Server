@@ -13,7 +13,7 @@ from typing import Optional, List
 from .schema import MsgType, StreamingMessage, DecodeResult, ASREngineConfig, TranscribeResult, ForcedAlignItem, ForcedAlignResult
 from .utils import normalize_language_name, validate_language
 from .encoder import QwenAudioEncoder
-from . import llama
+from ...llama import llama
 
 @dataclasses.dataclass
 class ASRS_Segment:

@@ -1,0 +1,12 @@
+# CapsWriter-Server Linux 运行依赖（Python >= 3.10），由 setup_linux.sh 安装。
+# Windows 不用这个文件：start_server.exe 自带 internal/ 冻结运行时。
+# 版本与此前在 Linux 服务器上跑通的环境一致。
+
+numpy==2.2.6
+# [cuda,cudnn] 会把 CUDA 12 运行库与 cuDNN 9 以 pip 包形式装进环境（约 3GB），只依赖显卡驱动；
+# 系统已装好 CUDA 12 + cuDNN 9 时可用 `./setup_linux.sh --system-cuda` 跳过
+onnxruntime-gpu[cuda,cudnn]==1.23.2
+gguf==0.19.0
+rich==15.0.0
+websockets==16.0
+colorama==0.4.6

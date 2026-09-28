@@ -20,7 +20,7 @@ class QwenASRStream(RecognitionStream):
 
 
 class QwenASREngine(BaseASREngine):
-    """Qwen-ASR 推理引擎适配器，实现与 FunASREngine 类似的接口"""
+    """Qwen-ASR 推理引擎适配器，实现 BaseASREngine 接口"""
 
     def __init__(self, config: ASREngineConfig):
         super().__init__(config)

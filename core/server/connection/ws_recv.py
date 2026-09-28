@@ -17,6 +17,7 @@ from core.protocol import AudioMessage
 from core.constants import AudioFormat
 from core.tools.my_status import Status
 from .. import logger
+from .. import runtime_status
 
 
 # 麦克风接收状态指示器
@@ -102,6 +103,7 @@ async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) 
                     language=msg.language,
                 )
                 cache.offset += msg.seg_duration
+                runtime_status.task_queued()
                 queue_in.put(task)
                 logger.debug(
                     f"提交音频片段，任务ID: {msg.task_id}, "
@@ -130,6 +132,7 @@ async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) 
                 context=msg.context,
                 language=msg.language,
             )
+            runtime_status.task_queued()
             queue_in.put(task)
             logger.debug(f"提交最终片段，任务ID: {msg.task_id}, 数据大小: {len(cache.chunks)} bytes")
 

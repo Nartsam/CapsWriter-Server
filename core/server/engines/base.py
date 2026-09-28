@@ -29,7 +29,7 @@ class RecognitionResult:
 class RecognitionStream(ABC):
     """
     标准识别流接口
-    有些引擎（如 sherpa-onnx）支持流式，而有些（如基于音频分片的同步引擎）则内部模拟。
+    有些引擎支持真实流式，而有些（如 Qwen3-ASR 这类基于音频分片的同步引擎）则内部模拟。
     """
     def __init__(self, sample_rate: int = 16000):
         self.sample_rate = sample_rate
@@ -45,7 +45,7 @@ class BaseASREngine(ABC):
     """
     语音识别引擎基类
     
-    所有的 ASR 引擎（SenseVoice, Paraformer, Qwen 等）都必须继承此类并实现其接口。
+    所有的 ASR 引擎（目前只有 Qwen3-ASR）都必须继承此类并实现其接口。
     """
 
     def __init__(self, config: Any):
@@ -79,23 +79,6 @@ class BaseASREngine(ABC):
     @abstractmethod
     def cleanup(self):
         """释放模型资源"""
-        pass
-
-
-class BasePuncEngine(ABC):
-    """
-    标点引擎基类
-    """
-
-    def __init__(self, config: Any):
-        self.config = config
-
-    def punctuate(self, text: str) -> str:
-        """ 为文本注入或修正标点。默认行为：原样返回。 """
-        return text
-
-    def cleanup(self):
-        """ 释放资源 """
         pass
 
 

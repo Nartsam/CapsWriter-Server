@@ -8,6 +8,7 @@ CapsWriter Offline 服务端主程序门面类 (Facade)
 """
 
 import os
+import sys
 import asyncio
 from pathlib import Path
 from config_server import ServerConfig as Config, __version__
@@ -16,6 +17,8 @@ from core.tools.signal_handler import register_signal
 from .worker.process_manager import ProcessManager
 from .connection.server_manager import SocketManager
 from .ui.tray_manager import TrayManager
+from . import launch
+from . import runtime_status
 from . import logger
 
 class CapsWriterServer:
@@ -86,23 +89,47 @@ class CapsWriterServer:
     def start(self):
         """
         同步启动服务端 (主入口)
-        
+
+        Windows 的 start_server.exe 与 Linux 的 start_server.py 都只调用这一个方法，
+        命令行参数与环境变量也在这里处理，保证两个入口行为一致。
+
         注册信号处理、拉起子进程并进入网络服务监听循环。
         """
         # 防连续触发
         if self.is_alive: return
+
+        # 命令行参数 / 环境变量覆盖配置（见 launch.py）
+        args = launch.parse_args()
+        launch.export_args(args)
+        launch.apply_overrides()
+
+        if args.download_models:
+            from .model_download import download_models
+            sys.exit(0 if download_models() else 1)
+
         self.is_alive = True
 
         # 注册退出信号处理
         register_signal(self.stop)
 
-        # 托盘图标
-        self.tray_manager.start()
         self._print_banner()
 
-        # 拉起识别子进程
+        # 先确认端口可用，再花时间加载模型（托盘会隐藏控制台窗口，所以也要在托盘之前）
+        if not self.socket_manager.check_port_available():
+            self.is_alive = False
+            launch.pause_before_exit()
+            sys.exit(1)
+
+        # 托盘图标
+        self.tray_manager.start()
+
+        runtime_status.initialize()
+
+        # 拉起识别子进程（阻塞到模型加载完成）
         self.process_manager.start()
-        
+        if not self.is_alive:   # 子进程加载模型失败，已触发 stop()
+            sys.exit(1)
+
         # 开启网络服务监听 (接管当前线程直至退出)
         try:
             self.loop.run_until_complete(self.socket_manager.start()) 

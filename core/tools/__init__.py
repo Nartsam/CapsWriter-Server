@@ -10,9 +10,9 @@
 - empty_working_set: Windows 内存管理
 - format_tools: 文本格式化（中英文空格调整）
 - my_status: Rich Status 扩展
-- hot_sub_*: 热词替换工具
-- srt_from_txt: SRT 字幕生成
-- window_detector: 窗口检测
+- daemon_executor: 守护线程执行器（asyncio 默认执行器）
+- signal_handler: 退出信号处理
+- token_sync: 格式化后把标点同步回 token 序列
 """
 
 from core.tools.asyncio_to_thread import to_thread
