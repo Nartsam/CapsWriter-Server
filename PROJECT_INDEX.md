@@ -28,6 +28,8 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 ├── start_server.py           # Linux/开发入口：内容与 exe 内嵌脚本完全相同
 ├── start_server.sh           # Linux 启动脚本：找 Python、设 LD_LIBRARY_PATH，exec start_server.py（兼容 asmgt）
 ├── setup_linux.sh            # Linux 环境安装（conda/venv + requirements-linux.txt + 自检）
+├── download_models.bat       # 下载模型（Windows，双击）= start_server.exe --download-models
+├── download_models.sh        # 下载模型（Linux）= ./start_server.sh --download-models
 ├── requirements-linux.txt    # Linux 依赖（Windows 的依赖在 internal/ 里）
 ├── config_server.py          # 唯一的配置文件（两平台共用）
 ├── internal/                 # Windows 冻结运行时：Python 3.13 标准库 .pyc + 第三方库（已剔除客户端依赖）
@@ -169,7 +171,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 
 - **语法检查**：`python -c "import ast; ..."` 用 `ast.parse`，不要用 `py_compile`（会生成 `__pycache__`）。系统 Python 通常没有项目依赖，不能直接 `import core`。
 - **Windows 实机验证**：改完代码 → `start_server.exe --port 6100`（换个端口，避免和正在使用的实例冲突）→ 另开终端 `python tools/smoke_test.py --port 6100`。
-- **Linux 验证**：`./start_server.sh --port 6100` + `python3 tools/smoke_test.py --port 6100`；本机可用 WSL 模拟（2026-09-28 在 WSL Ubuntu 22.04 上验证过 clone → setup → 下载模型 → 启动 → 冒烟测试 → 信号处理，详见 docs/DEV_NOTES.md；WSL 没有 Vulkan，llama.cpp 只能走 CPU）。
+- **Linux 验证**：在 Linux 服务器上 `./start_server.sh --port 6100` + `python3 tools/smoke_test.py --port 6100`。**不要在 Windows 开发机的 WSL 里测试**（用户要求，曾占满 C 盘）；在 Windows 上改了 Linux 相关代码时，做静态检查（`ast.parse(..., feature_version=(3, 10))`、`bash -n`），并把需要真机验证的项写进 docs/DEV_NOTES.md 的“待验证”。
 - **`tools/smoke_test.py`**：只依赖标准库，模拟客户端发送 `tools/assets/demo.wav`（16.5 秒新闻播报）。常用参数：`--source file`（触发对齐模型，输出的时间戳范围应接近 0.3~16.3s 而非 0~16.2s 的均分值）、`--seg-duration 6 --seg-overlap 2`（强制多段，测试拼接）、`--expect 子串`、`--json`、`--host`（测远程服务器）。期望结果约为“财联社1月7日电，从国家邮政局了解到，十四五以来，我国建成世界上规模最大、受益人数最多的寄递网络，邮政快递业业务年均增长10%。”（采样有随机性，标点可能略有差异）。
 - **提交规范**：`__pycache__`、`models/`、`logs/` 不进仓库；`internal/` 按字节原样跟踪（`.gitattributes` 已设 `-text`）；Linux `.so` 的别名是 git 符号链接，在 Windows 上表现为小文本文件，**不要用普通文件覆盖它们**；`.sh` 必须是 LF 且带可执行位（Windows 上用 `git update-index --chmod=+x`）。
 

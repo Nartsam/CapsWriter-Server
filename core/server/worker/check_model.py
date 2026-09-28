@@ -14,7 +14,7 @@ from core.server.launch import is_interactive, pause_before_exit
 from core.server.model_download import missing_files, missing_packages, download_models
 from . import logger
 
-_DOWNLOAD_CMD = 'start_server.exe --download-models' if sys.platform == 'win32' else './start_server.sh --download-models'
+_DOWNLOAD_CMD = 'download_models.bat' if sys.platform == 'win32' else './download_models.sh'
 
 
 def check_model() -> None:

@@ -13,7 +13,7 @@ Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWrite
 ### Windows 10/11
 
 1. 需要 [VC++ 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)（缺 DLL 时安装）。
-2. 下载模型（约 2.5GB，只需一次）：在项目目录打开终端运行 `start_server.exe --download-models`。也可以直接双击 `start_server.exe`，缺模型时会询问是否下载。
+2. 下载模型（约 2.5GB，只需一次）：双击 `download_models.bat`（等同于 `start_server.exe --download-models`）。也可以直接双击 `start_server.exe`，缺模型时会询问是否下载。
 3. 双击 `start_server.exe`，窗口会自动最小化到托盘；右键托盘图标可显示/隐藏窗口、重启或退出（重启等同于退出后再手动启动一次，改完配置用它即可生效）。
 4. 开机启动：把 `start_server.exe` 的快捷方式放进 `Win+R` → `shell:startup` 打开的文件夹。
 
@@ -23,7 +23,7 @@ Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWrite
 
 ```bash
 ./setup_linux.sh                     # 创建 Python 环境并安装依赖
-./start_server.sh --download-models  # 下载模型
+./download_models.sh                 # 下载模型
 ./start_server.sh --port 6000 --gpu 0
 ```
 

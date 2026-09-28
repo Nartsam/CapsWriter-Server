@@ -20,3 +20,5 @@
 ## 验证
 
 改完代码至少：`ast.parse` 全部改动文件 → 用 `start_server.exe --port 6100`（Windows）或 `./start_server.sh --port 6100`（Linux）启动 → `python tools/smoke_test.py --port 6100`（加 `--source file` 测对齐、`--seg-duration 6 --seg-overlap 2` 测拼接）。详见 PROJECT_INDEX.md 的“开发环境与验证”。
+
+**不要在 WSL 里测试**（用户要求：会占满 C 盘）。在 Windows 上改了 Linux 相关代码时只做静态检查（`ast.parse(..., feature_version=(3, 10))`、`bash -n`），需要真机验证的项写进 docs/DEV_NOTES.md 的“待验证”，由用户在 Linux 服务器上验证。

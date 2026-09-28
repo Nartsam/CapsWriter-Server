@@ -8,7 +8,7 @@
 #   --python P     --venv 模式下使用的解释器，默认 python3（要求 >= 3.10）
 #   --system-cuda  不通过 pip 安装 CUDA/cuDNN 运行库，改用系统里已有的 CUDA 12 + cuDNN 9
 #
-# 完成后：./start_server.sh --download-models 下载模型，再 ./start_server.sh 启动。详见 docs/LINUX.md
+# 完成后：./download_models.sh 下载模型，再 ./start_server.sh 启动。详见 docs/LINUX.md
 
 set -Eeuo pipefail
 
@@ -87,7 +87,7 @@ fi
 from core.server.model_download import missing_packages
 missing = missing_packages()
 if missing:
-    print("   模型未就绪：" + "、".join(p.name for p in missing) + " —— 请运行 ./start_server.sh --download-models")
+    print("   模型未就绪：" + "、".join(p.name for p in missing) + " —— 请运行 ./download_models.sh")
 else:
     print("   模型已就绪")
 PY

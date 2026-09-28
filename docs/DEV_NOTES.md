@@ -5,7 +5,7 @@
 
 ## 待验证
 
-- [ ] **真实 Linux 服务器部署**（2026-09-28）：新入口只在 WSL Ubuntu 22.04 上验证过（结果见“已验证”）。WSL 没有 Vulkan 设备，llama.cpp 走的是 CPU，所以 **Vulkan GPU 解码** 与 **在 asmgt 里实际托管**（契约行为已在 WSL 用等价方式测过）还需要在服务器上按 [LINUX.md](LINUX.md) 的“从旧部署迁移”实测一遍。
+- [ ] **真实 Linux 服务器部署**（2026-09-28）：新入口只在 WSL Ubuntu 22.04 上验证过（结果见“已验证”）。WSL 没有 Vulkan 设备，llama.cpp 走的是 CPU，所以 **Vulkan GPU 解码** 与 **在 asmgt 里实际托管**（契约行为已在 WSL 用等价方式测过）还需要在服务器上按 [LINUX.md](LINUX.md) 的“从旧部署迁移”实测一遍。之后新增的 Linux 侧改动（2026-09-29 的 `download_models.sh`）只做过静态检查，也在这次一并验证。
 - [ ] **双击 exe 缺模型时的下载询问**（2026-09-28）：交互询问的代码路径已在 Linux 伪终端里验证（回答 n 正常退出），Windows 控制台里回答 Y 直接下载的完整流程还没实际走过。
 
 ## 已验证
@@ -27,6 +27,8 @@
 - **2026-09-28 asmgt**：只移植了符合 LAUNCHER-CONTRACT v1 的启动脚本；旧的 tmux 服务脚本、定时重启 cron 按其注释所说已被 asmgt 取代，未移植。
 - **2026-09-28 子进程信号**：Linux fork 出的识别子进程和 Manager 进程会继承主进程的 SIGTERM/SIGHUP 处理函数（调用主进程 app 副本的 `stop()`，报 `can only join a child process` 且不退出），现在子进程一律恢复默认处理；Manager 进程另起守护线程，主进程消失即退出（见 `core/tools/signal_handler.py`）。
 - **2026-09-28 托盘重启 = 完整退出后再启动**：Client 的做法是先 `Popen` 新进程再退出，服务端不能照搬——新进程启动时旧进程还占着端口和显存，会因端口冲突直接退出。改为先执行与“退出”相同的 `stop()`，等识别子进程真正结束后再以原命令行拉起新进程（Windows 放在新控制台）。
+- **2026-09-29 下载脚本**：新机器首次使用的流程是 clone →（Linux 先 `setup_linux.sh`）→ 运行 `download_models.bat` / `download_models.sh` → 启动。两个脚本只是转发给入口的 `--download-models`，下载逻辑仍只在 `model_download.py` 一处；`.bat` 保持纯 ASCII + CRLF（cmd 按 GBK 代码页解析，含 UTF-8 中文的批处理容易出错）。
+- **2026-09-29 不再用 WSL 测试**（用户要求）：WSL 测试曾把 C 盘写满（ext4.vhdx 只增不减，段错误还留下 1.1GB 转储）。Linux 侧改动改为静态检查（`ast.parse(..., feature_version=(3, 10))`、`bash -n`），真机行为记入“待验证”，由用户在 Linux 服务器上验证。
 - **2026-09-28 cuDNN 固定 9.1.0**：pip 默认装最新 9.26，实测在 Pascal（GTX 1080 Ti）上让 ORT CUDA 后端创建会话时直接段错误；换回旧服务器环境里的 9.1.0 即正常。Blackwell 显卡需要 cuDNN ≥ 9.7，换卡时要重新评估这个固定版本。
 
 ## 已知状态 / 怪现象

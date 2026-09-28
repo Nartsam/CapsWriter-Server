@@ -15,7 +15,7 @@ Linux 入口是 `start_server.sh`，它只准备运行环境（找 Python、设�
 ```bash
 git clone <仓库地址> capswriter && cd capswriter
 ./setup_linux.sh                    # 建环境 + 装依赖（约 3GB），最后会做一次自检
-./start_server.sh --download-models # 下载模型（约 2.5GB），带 SHA-256 校验与断点续传
+./download_models.sh                # 下载模型（约 2.5GB，等同于 ./start_server.sh --download-models），带 SHA-256 校验与断点续传
 ./start_server.sh --port 6000 --gpu 0
 ```
 
@@ -59,7 +59,7 @@ git clone <仓库地址> capswriter && cd capswriter
 
 1. 在 asmgt 中停止旧实例。
 2. clone 新仓库到新目录，运行 `./setup_linux.sh`。也可以先沿用旧环境：`export CAPSWRITER_PYTHON=<旧目录>/.conda-env/bin/python`（旧环境的依赖足够，`start_server.sh` 会自动带上它的 `lib/cudnn-local`）。
-3. 模型：运行 `./start_server.sh --download-models`；或从旧目录拷贝 `models/Qwen3-ASR/`，对齐模型拷到 `models/Qwen3-ForcedAligner/Qwen3-ForcedAligner-0.6B/` 下。
+3. 模型：运行 `./download_models.sh`；或从旧目录拷贝 `models/Qwen3-ASR/`，对齐模型拷到 `models/Qwen3-ForcedAligner/Qwen3-ForcedAligner-0.6B/` 下。
 4. 前台试跑 `./start_server.sh --port <端口> --gpu <N>`，用 `python3 tools/smoke_test.py --port <端口>` 验证（只需标准库，也可在其他机器上加 `--host` 远程测试）。
 5. 把 asmgt 的启动命令改为新目录的 `start_server.sh`。
 
@@ -72,5 +72,5 @@ git clone <仓库地址> capswriter && cd capswriter
 | 识别慢，日志有 `ONNX 推理后端 CUDA 不可用，已回退到 CPUExecutionProvider` | CUDA/cuDNN 库没加载上：确认用 `start_server.sh` 启动（它负责 `LD_LIBRARY_PATH`）；重新运行 `./setup_linux.sh`；`--system-cuda` 模式下检查系统 CUDA 12 / cuDNN 9 |
 | 识别慢，`nvidia-smi` 里看不到显存占用 | llama.cpp 没用上 Vulkan：确认 NVIDIA Vulkan ICD 存在；`log_level = 'INFO'` 后看 `ggml_vulkan: Found N Vulkan devices` |
 | 启动即退出，提示端口冲突 | 换端口或停掉占用者：`ss -tlnp \| grep <端口>` |
-| 启动即退出，提示缺少模型 | `./start_server.sh --download-models` |
+| 启动即退出，提示缺少模型 | `./download_models.sh` |
 | 其他 | 日志在 `logs/server_latest.log`（按 `log_level` 记录，超过 10MB 自动截断）；控制台只输出 WARNING 以上 |

@@ -1,10 +1,10 @@
 # 模型目录
 
-模型文件体积大（约 2.8GB），**不进 git**（本目录除这份说明外都被 `.gitignore` 忽略）。新机器 clone 后先下载模型：
+模型文件体积大（约 2.8GB），**不进 git**（本目录除这份说明外都被 `.gitignore` 忽略）。新机器 clone 后先运行项目根目录的下载脚本：
 
 ```bash
-start_server.exe --download-models      # Windows
-./start_server.sh --download-models     # Linux
+download_models.bat      # Windows：双击即可，等同于 start_server.exe --download-models
+./download_models.sh     # Linux：先 ./setup_linux.sh，等同于 ./start_server.sh --download-models
 ```
 
 直接启动服务端时如果缺少必需模型，在交互终端里会询问是否立即下载；被服务管理器托管（无终端）时会打印上面的命令并退出。

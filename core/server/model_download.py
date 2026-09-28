@@ -8,6 +8,7 @@
 只用标准库：Windows 上跑在 start_server.exe 的冻结运行时里，Linux 上跑在项目环境里。
 
 入口：
+- `download_models.bat` / `./download_models.sh`（下载脚本，分别等同于下面的命令）
 - `start_server.exe --download-models` / `./start_server.sh --download-models`
 - 启动时缺少必需模型、且运行在交互终端里时，check_model 会询问是否立即下载
 
