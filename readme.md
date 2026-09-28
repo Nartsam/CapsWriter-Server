@@ -1,87 +1,68 @@
 # CapsWriter-Server
 
-> **按住 CapsLock 说话，松开就上屏。就这么简单。**
+CapsWriter 离线语音输入的**服务端**：通过 WebSocket 接收 CapsWriter-Client（另一个仓库）发来的音频，用 **Qwen3-ASR-1.7B** 在本地识别后返回文字；客户端的“文件转录”额外用 **Qwen3-ForcedAligner** 生成字级时间戳。
 
-**CapsWriter-Offline** 是一个专为 Windows 打造的**完全离线**语音输入工具。**CapsWriter-Server**是和**CapsWriter-Client**配套的服务端。
+Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) v2.5，拆出服务端单独维护（客户端代码和其他识别模型已移除），仅供个人使用。
 
+- 完全离线，识别在本机/自己的服务器上完成
+- Windows 与 Linux 两套入口、同一份代码、相同的参数与行为
+- 显卡加速：LLM 解码走 llama.cpp Vulkan，音频编码器 Windows 用 CPU/DirectML、Linux 用 CUDA
 
-## ✨ 核心特性
+## 快速开始
 
--   **语音输入**：按住 `CapsLock键` 或 `鼠标侧键X2` 说话，松开即输入，超低延迟，默认去除末尾逗句号。支持对讲机模式和单击录音模式。
--   **文件转录**：音视频文件往客户端 exe 一丢，字幕 (`.srt`)、文本 (`.txt`)、时间戳 (`.json`) 统统都有。
--   **数字 ITN**：自动将「十五六个」转为「15~16个」，支持各种复杂数字格式。
--   **热词替换**：在 `hot.txt` 记下偏僻词，通过音素模糊匹配，相似度大于阈值则强制替换。
--   **正则替换**：在 `hot-rule.txt` 用正则或简单等号规则，精准强制替换。
--   **LLM 角色**：预置了润色、小助理等角色，当识别结果的开头匹配任一角色名字时，将交由该角色处理。
--   **托盘菜单**：右键托盘图标即可添加热词、复制结果、清除LLM记忆。
--   **C/S 架构**：服务端与客户端分离，虽然 Win7 老电脑跑不了服务端模型，但最少能用客户端输入。
--   **日记归档**：按日期保存你的每一句语音及其识别结果。
--   **录音保存**：所有语音均保存为本地音频文件，隐私安全，永不丢失。
+### Windows 10/11
 
-**CapsWriter-Offline** 的精髓在于：**完全离线**（不受网络限制）、**响应极快**、**高准确率** 且 **高度自定义**。我追求的是一种「如臂使指」的流畅感，让它成为一个专属的一体化输入利器。无需安装，一个U盘就能带走，随插随用，保密电脑也能用。
+1. 需要 [VC++ 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)（缺 DLL 时安装）。
+2. 下载模型（约 2.5GB，只需一次）：在项目目录打开终端运行 `start_server.exe --download-models`。也可以直接双击 `start_server.exe`，缺模型时会询问是否下载。
+3. 双击 `start_server.exe`，窗口会自动最小化到托盘；托盘菜单可显示/隐藏窗口或退出。
+4. 开机启动：把 `start_server.exe` 的快捷方式放进 `Win+R` → `shell:startup` 打开的文件夹。
 
-以下为支持的模型：
+`start_server.exe` 只是启动器，运行时在 `internal/`，代码在 `core/`，都随仓库提供，clone 下来即可用（模型除外）。
 
-| 引擎名 | 准确性 | 速度 | 格式 | 显卡加速 |
-|------|-------|------|------|---------|
-| Paraformer | ★★★☆☆ | ★★★★★ | ONNX | ❌ |
-| SenseVoice-Small | ★★★☆☆ | ★★★★★ | ONNX | ✅ |
-| Fun-ASR-Nano | ★★★★☆ | ★★★★☆ | ONNX + GGUF | ✅ |
-| Qwen3-ASR | ★★★★★ | ★★★☆☆ | ONNX + GGUF | ✅ |
+### Linux（NVIDIA 显卡）
 
-详细功能说明请参考 [`docs/`](docs/) 目录：
-- [环境依赖安装说明](docs/环境依赖安装说明.md) — VC++ 运行库、FFmpeg 安装
-- [热词功能如何使用](docs/热词功能如何使用.md) — 热词替换、规则替换、自定义短语
-- [角色功能如何使用](docs/角色功能如何使用.md) — LLM 角色配置、输出模式、创建新角色
-- [识别语言如何配置](docs/识别语言如何配置.md) — 各引擎语言支持范围与配置方法
-- [文件转录功能如何使用](docs/文件转录功能如何使用.md) — 拖拽转字幕、时间戳对齐
-- [显卡加速的若干问题](docs/显卡加速的若干问题.md) — DirectML、Vulkan 加速配置
-- [模型下载的若干问题](docs/模型下载的若干问题.md) — 引擎选择、模型下载、目录结构
-- [更新日志](docs/CHANGELOG.md) 
+```bash
+./setup_linux.sh                     # 创建 Python 环境并安装依赖
+./start_server.sh --download-models  # 下载模型
+./start_server.sh --port 6000 --gpu 0
+```
 
+详见 [docs/LINUX.md](docs/LINUX.md)（含 asmgt 托管与从旧部署迁移）。
 
-## 💻 平台支持
+## 配置与启动参数
 
-目前**仅能保证在 Windows 10/11 (64位) 下完美运行**。
+所有设置在 [`config_server.py`](config_server.py)（两个平台共用）。监听地址、端口、GPU 也可以启动时临时指定，两个入口完全相同：
 
-- **Linux**：暂无环境进行测试和打包，无法保证兼容性。
-- **MacOS**：由于底层的 `keyboard` 库已放弃支持 MacOS，且系统限制极多，暂时无法支持。
+```
+start_server.exe / ./start_server.sh  [--host ADDR] [--port N] [--gpu N] [--download-models]
+```
 
-[LazyTyper](https://lazytyper.com/) 和 [闪电说](https://shandianshuo.cn/) 也是很优秀的作品，都有离线引擎，都支持 Windows Linux 与 MacOS，并都有漂亮的图形化页面，推荐使用。
+或使用环境变量 `CAPSWRITER_HOST` / `CAPSWRITER_PORT` / `CAPSWRITER_GPU` / `CAPSWRITER_ONNX_PROVIDER`，说明见 [PROJECT_INDEX.md](PROJECT_INDEX.md#启动参数与环境变量)。
 
-CapsWriter 的特别之处在于追求：
+客户端连接地址：`ws://<服务端IP>:<端口>`（在 Client 仓库的 `config_client.py` 中配置）。
 
-- 无感输入
-- 完全离线，不受网络约束
-- 低延迟，尽量做到硬件极限的最快速度
-- 高度自定义的热词系统
+## 验证服务是否正常
 
+```bash
+python tools/smoke_test.py --port 6000               # 任意 Python 3.8+，无需安装依赖
+python tools/smoke_test.py --host 10.0.0.2 --port 6000 --source file
+```
 
-## 🎬 快速开始
+## 文档
 
-1.  **准备环境**：确保安装了 [VC++ 运行库](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist)。若要使用文件转录功能，还需安装 [ffmpeg](https://ffmpeg.org/download.html) 并确保其在系统 PATH 中。
-2.  **下载解压**：下载 [Latest Release](https://github.com/HaujetZhao/CapsWriter-Offline/releases/latest) 里的软件本体，再到 [Models Release](https://github.com/HaujetZhao/CapsWriter-Offline/releases/tag/models) 下载模型压缩包，将模型解压，放入 `models` 文件夹中对应模型的文件夹里。
-3.  **启动服务**：双击 `start_server.exe`，**它会自动最小化到托盘菜单**。
-4.  **启动听写**：双击 `start_client.exe`，**它会自动最小化到托盘菜单**。
-5.  **开始录音**：按住 `CapsLock键` 或 `鼠标侧键X2` 就可以说话了！
+| 文档 | 内容 |
+|---|---|
+| [PROJECT_INDEX.md](PROJECT_INDEX.md) | 项目结构与架构（开发/AI Agent 入口） |
+| [docs/LINUX.md](docs/LINUX.md) | Linux 部署、asmgt、故障排查 |
+| [docs/显卡加速.md](docs/显卡加速.md) | GPU 加速配置 |
+| [models/README.md](models/README.md) | 模型下载与目录结构 |
+| [docs/text_merge_algorithm.md](docs/text_merge_algorithm.md) | 长音频分段拼接算法 |
+| [docs/DEV_NOTES.md](docs/DEV_NOTES.md) | 开发笔记：决策、已知问题、待办 |
 
+## 常见问题
 
-## ⚙️ 个性化配置
+**Q：启动后立即退出，提示端口冲突？** 已有服务端在运行（托盘里找找），或换个端口 `--port 6001`。
 
-所有的设置都在根目录的 `config_server.py` 和 `config_client.py` 里，可直接编辑。
+**Q：识别很慢？** 把 `config_server.py` 的 `log_level` 改为 `'INFO'` 后查看 `logs/server_latest.log`，确认 ONNX 后端与 Vulkan 设备是否用上了显卡，见 [docs/显卡加速.md](docs/显卡加速.md)。
 
-
-## 🛠️ 常见问题
-
-
-**Q: 为什么按了没反应？**  
-A: 请确认 `start_client.exe` 的黑窗口还在运行。若想在管理员权限运行的程序中输入，也需以管理员权限运行客户端。
-
-**Q: 为什么识别结果没字？**  
-A: 到 `年/月/assets` 文件夹中检查录音文件，看是不是没有录到音；听听录音效果，是不是麦克风太差，建议使用桌面 USB 麦克风；检查麦克风权限。
-
-**Q: 想要隐藏黑窗口？**  
-A: 点击托盘菜单即可隐藏黑窗口。
-
-**Q: 如何开机启动？**  
-A: `Win+R` 输入 `shell:startup` 打开启动文件夹，将服务端、客户端的快捷方式放进去即可。
+**Q：想隐藏/找回控制台窗口？** 双击托盘图标切换显示/隐藏。
