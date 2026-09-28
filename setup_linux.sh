@@ -59,7 +59,7 @@ REQ="$BASE_DIR/requirements-linux.txt"
 if [[ "$SYSTEM_CUDA" == 1 ]]; then
     REQ="$(mktemp)"
     trap 'rm -f "$REQ"' EXIT
-    sed 's/onnxruntime-gpu\[cuda,cudnn\]/onnxruntime-gpu/' "$BASE_DIR/requirements-linux.txt" > "$REQ"
+    grep -v '^nvidia-' "$BASE_DIR/requirements-linux.txt" > "$REQ"
 fi
 "$PYTHON" -m pip install --upgrade pip
 "$PYTHON" -m pip install -r "$REQ"

@@ -227,9 +227,11 @@ class _Progress:
             self._print()
 
     def finish(self) -> None:
-        self._print()
         if self.tty:
+            self._print()
             print()
+        elif self.last_decile < 10:     # 非终端模式下 100% 那一行已由 update 打印过
+            self._print()
 
     def _print(self) -> None:
         speed = (self.done - self.start_done) / max(time.time() - self.t0, 1e-6) / 2**20

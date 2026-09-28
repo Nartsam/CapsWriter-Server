@@ -3,10 +3,21 @@
 # 版本与此前在 Linux 服务器上跑通的环境一致。
 
 numpy==2.2.6
-# [cuda,cudnn] 会把 CUDA 12 运行库与 cuDNN 9 以 pip 包形式装进环境（约 3GB），只依赖显卡驱动；
-# 系统已装好 CUDA 12 + cuDNN 9 时可用 `./setup_linux.sh --system-cuda` 跳过
-onnxruntime-gpu[cuda,cudnn]==1.23.2
+onnxruntime-gpu==1.23.2
 gguf==0.19.0
 rich==15.0.0
 websockets==16.0
 colorama==0.4.6
+
+# ---- CUDA 12 / cuDNN 9 运行库（pip 包形式装进环境，只依赖显卡驱动）----
+# 系统已装好 CUDA 12 + cuDNN 9 时，`./setup_linux.sh --system-cuda` 会跳过以下所有 nvidia-* 包。
+# cuDNN 固定为 9.1.0：旧服务器环境用的就是它；pip 默认会装最新的 9.x，
+# 实测 9.26 在 Pascal 显卡（GTX 1080 Ti）上会让 onnxruntime 的 CUDA 后端直接段错误。
+# 注意 Blackwell（RTX 50 系等）需要 cuDNN >= 9.7，届时再调整。
+nvidia-cudnn-cu12==9.1.0.70
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cuda-runtime-cu12==12.9.79
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cufft-cu12==11.4.1.4
+nvidia-curand-cu12==10.3.10.19
+nvidia-nvjitlink-cu12==12.9.86

@@ -56,6 +56,10 @@ class RecognizerWorker:
 
         # 仅注册主信号
         signal.signal(signal.SIGINT, lambda signum, frame: None)
+
+        # Linux fork 会继承主进程的 SIGTERM/SIGHUP 处理函数，恢复为默认（直接终止）
+        from core.tools.signal_handler import reset_child_signals
+        reset_child_signals()
         
         # atexit 兜底
         atexit.register(self.stop)

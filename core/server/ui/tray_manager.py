@@ -30,13 +30,13 @@ class TrayManager:
         # 获取图标路径
         icon_path = os.path.join(self.app.base_dir, 'assets', 'icon.ico')
         
-        # 启用托盘
-        enable_min_to_tray(
+        # 启用托盘（非 Windows / 无控制台窗口时 enable_min_to_tray 会跳过）
+        if enable_min_to_tray(
             'CapsWriter Server',
             icon_path,
             exit_callback=self._request_exit
-        )
-        logger.info("托盘图标已启用")
+        ):
+            logger.info("托盘图标已启用")
 
     def _request_exit(self, icon=None, item=None):
         """托盘图标引用的退出回调"""

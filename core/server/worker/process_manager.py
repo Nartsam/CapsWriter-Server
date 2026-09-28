@@ -8,7 +8,9 @@ from __future__ import annotations
 import sys
 import os
 import queue
-from multiprocessing import Process, Manager
+from multiprocessing import Process
+from multiprocessing.managers import SyncManager
+from core.tools.signal_handler import init_manager_process
 from typing import TYPE_CHECKING
 from ..state import console
 from . import start_worker
@@ -25,6 +27,7 @@ class ProcessManager:
     """
     def __init__(self, app: CapsWriterServer):
         self._process = None
+        self._manager = None
         self.app = app
         self.is_alive = False
 
@@ -40,9 +43,12 @@ class ProcessManager:
         self.is_alive = True
 
         # 1. 初始化共享资源（模型文件已由 CapsWriterServer.start() 预先检查）
-        # 使用 Manager 管理共享列表，用于追踪活动连接
+        # 使用 Manager 管理共享列表，用于追踪活动连接。
+        # Manager 服务进程初始化时恢复默认信号处理，并在主进程消失后自行退出（见 init_manager_process）
         state = self.app.state
-        state.sockets_id = Manager().list()
+        self._manager = SyncManager()
+        self._manager.start(init_manager_process)
+        state.sockets_id = self._manager.list()
         
         # 获取标准输入文件描述符，用于 Windows 下的信号传递补丁
         stdin_fn = sys.stdin.fileno()

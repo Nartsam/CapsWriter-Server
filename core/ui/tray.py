@@ -310,7 +310,7 @@ class _TraySystem:
         self.toggle_window()
 
 
-def enable_min_to_tray(name: Optional[str] = None, icon_path: Optional[str] = None, exit_callback=None, more_options: list = None) -> None:
+def enable_min_to_tray(name: Optional[str] = None, icon_path: Optional[str] = None, exit_callback=None, more_options: list = None) -> bool:
     """
     启用最小化到托盘功能
 
@@ -322,9 +322,10 @@ def enable_min_to_tray(name: Optional[str] = None, icon_path: Optional[str] = No
         icon_path: 图标文件路径，默认动态生成
         exit_callback: 退出回调函数，当用户点击托盘退出菜单时调用
         more_options: 额外菜单项列表，格式为 [(名称, 回调函数), ...]
-    """
-    global _tray_instance
 
+    Returns:
+        是否启用了托盘（非 Windows、缺少 pystray、没有控制台窗口时为 False）
+    """
     global _tray_instance
 
     # 设置退出回调函数
@@ -334,7 +335,7 @@ def enable_min_to_tray(name: Optional[str] = None, icon_path: Optional[str] = No
     # 检查托盘功能是否可用
     if not _check_tray_available():
         logger.info("托盘功能不可用，跳过启用")
-        return
+        return False
 
     # DPI 感知设置
     try:
@@ -345,13 +346,14 @@ def enable_min_to_tray(name: Optional[str] = None, icon_path: Optional[str] = No
 
     with _lock:
         if _tray_instance is not None:
-            return  # 已启动
+            return True  # 已启动
 
         if not _get_console_hwnd():
-            return  # 没有控制台窗口
+            return False  # 没有控制台窗口
 
         _tray_instance = _TraySystem(name, icon_path, more_options)
         _tray_instance.start()
+        return True
 
 
 
