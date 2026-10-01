@@ -44,10 +44,14 @@ class QwenASREngine(BaseASREngine):
         context: Optional[str] = None,
         language: Optional[str] = None,
         temperature: float = 0.4,
+        prefix_text: str = '',
         **kwargs
     ):
         """
         解码识别流
+
+        prefix_text: 作为 assistant 已输出内容的前缀，模型从它之后接着写，结果只含续写部分。
+            流式任务用它带上前几句的识别文字，此时音频也要包含这几句（见 worker/streaming.py）
         """
         if stream.audio_data is None:
             return
@@ -67,7 +71,7 @@ class QwenASREngine(BaseASREngine):
         mapped_lang = get_language(ENGINE_QWEN_ASR, language) if language else None
         full_embd = self.engine._build_prompt_embd(
             audio_embd=audio_embd,
-            prefix_text="", # 这里的 prefix_text 是 Assistant 已说的内容，流式分段时通常为空或使用 context
+            prefix_text=prefix_text,
             context=context,
             language=mapped_lang
         )
@@ -75,7 +79,7 @@ class QwenASREngine(BaseASREngine):
         # 4. 执行解码
         res = self.engine._safe_decode(
             full_embd, 
-            prefix_text="", 
+            prefix_text=prefix_text, 
             rollback_num=5, 
             is_last_chunk=True, 
             temperature=temperature, 

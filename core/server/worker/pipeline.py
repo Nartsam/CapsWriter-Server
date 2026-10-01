@@ -9,12 +9,17 @@
 
 import re
 import time
+from dataclasses import replace
+
+import numpy as np
+
 from core.server.state import WorkerState, console
 from core.server.schema import Task, Result
 from core.server.formatter import TextFormatter
 from core.tools.token_sync import sync_tokens_from_text
 from core.server.engines.base import EngineCapabilities
 from .audio import process_audio_task
+from .streaming import StreamState
 from . import logger
 
 # 导入拆分后的算法子包
@@ -58,6 +63,8 @@ class TaskPipeline:
         """
         处理单个音频任务片段并返回识别结果
         """
+        if task.streaming:
+            return self._process_stream(task)
         try:
             logger.info(f"任务 {task.task_id[:8]}, 语言={task.language}, 来源={task.source}")
             is_first_segment = task.task_id not in self.state.sessions
@@ -142,23 +149,82 @@ class TaskPipeline:
             
             # 如果依然没有 tokens (麦克风跳过了对齐)，则用 text 回退
             if not result.tokens and result.text:
-                result.text_accu = result.text
-                chars = list(result.text_accu.replace(' ', ''))
-                if chars and result.duration > 0:
-                    t_per_char = result.duration / len(chars)
-                    result.tokens, result.timestamps = chars, [i * t_per_char for i in range(len(chars))]
+                self._fill_uniform_tokens(result)
             
             result.is_final = True
-            
-            # 打印统计
-            process_time = result.time_complete - task.time_submit
-            rtf = process_time / result.duration if result.duration > 0 else 0
-            logger.info(f"任务完成: {task.task_id[:8]}, 时长={result.duration:.2f}s, 耗时={process_time:.3f}s, RTF={rtf:.3f}")
+            self._log_finished(task, result)
 
             return result
 
         except Exception as e:
             logger.error(f"推理管线错误: {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def _fill_uniform_tokens(result: Result) -> None:
+        """没有字级时间戳时（麦克风任务）按字数均分时长生成，保持最终结果的字段齐全"""
+        result.text_accu = result.text
+        chars = list(result.text_accu.replace(' ', ''))
+        if chars and result.duration > 0:
+            t_per_char = result.duration / len(chars)
+            result.tokens, result.timestamps = chars, [i * t_per_char for i in range(len(chars))]
+
+    @staticmethod
+    def _log_finished(task: Task, result: Result) -> None:
+        process_time = result.time_complete - task.time_submit
+        rtf = process_time / result.duration if result.duration > 0 else 0
+        logger.info(f"任务完成: {task.task_id[:8]}, 时长={result.duration:.2f}s, 耗时={process_time:.3f}s, RTF={rtf:.3f}")
+
+    def _process_stream(self, task: Task) -> Result:
+        """
+        流式任务的一句：带前几句的音频和文字做前缀续写，返回本句新增的文字（Result.delta）
+
+        原理与取舍见 worker/streaming.py。每句单独格式化后发出，result.text 是已发出各段的拼接。
+        """
+        try:
+            session = self.state.get_session(task.task_id, task.socket_id, task.source)
+            result = session.result
+            if session.stream is None:
+                session.stream = StreamState()
+            stream_state = session.stream
+
+            samples = np.frombuffer(task.data, dtype=np.float32)
+            result.duration += len(samples) / task.samplerate
+
+            text = ''
+            # 静音句不识别；不足 0.1s 的尾巴同样跳过（与非流式的空片段处理一致）
+            if not task.silent and len(samples) >= 1600:
+                audio, prefix = stream_state.window(samples)
+                stream = self.recognizer.create_stream()
+                stream.accept_waveform(task.samplerate, audio)
+                self.recognizer.decode_stream(stream, context=task.context, language=task.language,
+                                              prefix_text=prefix)
+                text = stream.result.text
+                stream_state.remember(samples, text)
+                logger.info(f'续写：{text}（窗口 {len(audio) / task.samplerate:.1f}s，前缀 {len(prefix)} 字）')
+                console.print(f'\033[0G  续写：[cyan]{text}', soft_wrap=True)
+            elif task.silent:
+                logger.debug(f"跳过静音句，任务 {task.task_id[:8]}，{len(samples) / task.samplerate:.2f}s")
+
+            piece = stream_state.format(stream_state.take(text, task.is_final), self.formatter)
+            result.delta = piece
+            result.text += piece
+            result.time_start, result.time_submit = task.time_start, task.time_submit
+            result.time_complete = time.time()
+
+            if not task.is_final:
+                # 结果对象会被下一句继续修改，而 queue_out 在后台线程里才序列化，交出去的必须是副本
+                return replace(result)
+
+            if result.text:
+                self._fill_uniform_tokens(result)
+            result.is_final = True
+            console.print(f'  流式结果：[green]{result.text}\n', soft_wrap=True)
+            self._log_finished(task, result)
+            return result
+
+        except Exception as e:
+            logger.error(f"流式推理错误: {e}", exc_info=True)
             raise
 
 

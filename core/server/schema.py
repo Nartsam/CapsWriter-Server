@@ -7,7 +7,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 @dataclass
@@ -28,6 +28,8 @@ class Task:
         time_start: 录音/音频开始时间戳
         time_submit: 任务提交时间戳
         samplerate: 采样率，默认 16000 Hz
+        streaming: 流式上屏任务：片段是按停顿切出的一句，用前缀续写识别（见 worker/streaming.py）
+        silent: 片段里没有检测到语音，跳过识别（静音会被识别成「嗯。」之类的幻觉）
     """
     source: str
     data: bytes
@@ -41,6 +43,8 @@ class Task:
     context: str = ''
     language: str = 'auto'
     samplerate: int = 16000
+    streaming: bool = False
+    silent: bool = False
 
 
 @dataclass
@@ -82,7 +86,10 @@ class Result:
     text_accu: str = ''
     tokens: List[str] = field(default_factory=list)
     timestamps: List[float] = field(default_factory=list)
-    
+
+    # 流式任务：本条结果新增的文字（RecognitionMessage.delta）
+    delta: str = ''
+
     is_final: bool = False
 
 @dataclass
@@ -94,4 +101,5 @@ class RecognitionSession:
     """
     task_id: str
     result: Result
-    # 未来可在此扩展会话级状态，如 N-best 假设、中间特征缓存等
+    # 流式任务的前文状态（worker/streaming.StreamState），首个流式片段到达时创建
+    stream: Optional[Any] = None

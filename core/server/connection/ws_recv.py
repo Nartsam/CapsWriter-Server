@@ -9,10 +9,12 @@ import json
 import time
 from base64 import b64decode
 
+import numpy as np
 import websockets
 
 from ..state import console
 from ..schema import Task
+from .pause_splitter import PauseSplitter
 from core.protocol import AudioMessage
 from core.constants import AudioFormat
 from core.tools.my_status import Status
@@ -34,6 +36,7 @@ class AudioCache:
         self.chunks: bytes = b''    # 音频数据缓冲
         self.offset: float = 0.0    # 当前偏移时间（秒）
         self.byte_count: int = 0    # 累计接收字节数
+        self.splitter = None        # 流式任务的停顿切句状态，任务的第一个数据包到达时创建
 
     @property
     def duration(self) -> float:
@@ -50,13 +53,67 @@ class AudioCache:
         self.chunks = b''
         self.offset = 0.0
         self.byte_count = 0
+        self.splitter = None
+
+
+def _make_task(msg: AudioMessage, socket_id: str, data: bytes, offset: float,
+               is_final: bool, streaming: bool = False, silent: bool = False) -> Task:
+    """按消息里的任务参数构造一个识别片段"""
+    return Task(
+        source=msg.source,
+        data=data,
+        offset=offset,
+        task_id=msg.task_id,
+        socket_id=socket_id,
+        overlap=0.0 if streaming else msg.seg_overlap,
+        is_final=is_final,
+        time_start=msg.time_start,
+        time_submit=time.time(),
+        context=msg.context,
+        language=msg.language,
+        streaming=streaming,
+        silent=silent,
+    )
+
+
+def _handle_streaming(msg: AudioMessage, cache: AudioCache, data: bytes, socket_id: str, queue_in) -> None:
+    """
+    流式任务：在停顿处切句，每句单独提交，识别子进程用前缀续写逐句识别
+
+    不用 seg_duration / seg_overlap。片段之间没有重叠，前文由识别子进程自己保留。
+    """
+    if cache.splitter is None:
+        cache.splitter = PauseSplitter()
+    splitter = cache.splitter
+
+    if data:
+        for n_samples, has_speech in splitter.feed(np.frombuffer(data, dtype=np.float32)):
+            n_bytes = n_samples * AudioFormat.BYTES_PER_SAMPLE
+            segment, cache.chunks = cache.chunks[:n_bytes], cache.chunks[n_bytes:]
+            runtime_status.task_queued()
+            queue_in.put(_make_task(msg, socket_id, segment, cache.offset, False,
+                                    streaming=True, silent=not has_speech))
+            logger.debug(f"流式切句，任务ID: {msg.task_id}, 偏移: {cache.offset:.2f}s, "
+                         f"句长: {n_samples / AudioFormat.SAMPLE_RATE:.2f}s, 有语音: {has_speech}")
+            cache.offset += n_samples / AudioFormat.SAMPLE_RATE
+
+    if msg.is_final:
+        # 松手前的静音尾巴不识别（会被识别成「嗯。」）。但只在已经切出过句子时才这样判断：
+        # 整次录音只有一句时 VAD 的噪声底估计还不可靠，宁可照常识别，也不能把短句误判成静音丢掉
+        silent = splitter.cuts > 0 and not splitter.tail_has_speech
+        runtime_status.task_queued()
+        queue_in.put(_make_task(msg, socket_id, cache.chunks, cache.offset, True,
+                                streaming=True, silent=silent))
+        logger.debug(f"提交流式最终片段，任务ID: {msg.task_id}, 共 {splitter.cuts + 1} 句, "
+                     f"末句 {AudioFormat.bytes_to_seconds(len(cache.chunks)):.2f}s, 静音: {silent}")
+        cache.reset()
 
 
 async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) -> None:
     """
     处理客户端发送的音频消息
 
-    根据消息中的分段参数，将音频数据分段后提交到识别队列。
+    根据消息中的分段参数，将音频数据分段后提交到识别队列；流式任务改为在停顿处切句。
     """
     queue_in = app.state.queue_in
 
@@ -72,6 +129,14 @@ async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) 
         data = b64decode(msg.data)
         cache.chunks += data
         cache.byte_count += len(data)
+
+        if msg.streaming and msg.source == 'mic':
+            if msg.is_final:
+                status_mic.stop()
+            else:
+                status_mic.start()
+            _handle_streaming(msg, cache, data, socket_id, queue_in)
+            return
 
         if not msg.is_final:
             # 打印状态消息
@@ -89,19 +154,7 @@ async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) 
                 segment_data = cache.chunks[:segment_bytes]
                 cache.chunks = cache.chunks[stride_bytes:]
 
-                task = Task(
-                    source=msg.source,
-                    data=segment_data,
-                    offset=cache.offset,
-                    task_id=msg.task_id,
-                    socket_id=socket_id,
-                    overlap=msg.seg_overlap,
-                    is_final=False,
-                    time_start=msg.time_start,
-                    time_submit=time.time(),
-                    context=msg.context,
-                    language=msg.language,
-                )
+                task = _make_task(msg, socket_id, segment_data, cache.offset, False)
                 cache.offset += msg.seg_duration
                 runtime_status.task_queued()
                 queue_in.put(task)
@@ -119,19 +172,7 @@ async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) 
                 logger.info(f"音频文件接收完毕，任务ID: {msg.task_id}, 时长: {cache.total_duration:.2f}s")
 
             # 提交最终片段
-            task = Task(
-                source=msg.source,
-                data=cache.chunks,
-                offset=cache.offset,
-                task_id=msg.task_id,
-                socket_id=socket_id,
-                overlap=msg.seg_overlap,
-                is_final=True,
-                time_start=msg.time_start,
-                time_submit=time.time(),
-                context=msg.context,
-                language=msg.language,
-            )
+            task = _make_task(msg, socket_id, cache.chunks, cache.offset, True)
             runtime_status.task_queued()
             queue_in.put(task)
             logger.debug(f"提交最终片段，任务ID: {msg.task_id}, 数据大小: {len(cache.chunks)} bytes")

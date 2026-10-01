@@ -43,8 +43,8 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 │   │   ├── schema.py         # Task / Result / RecognitionSession
 │   │   ├── runtime_status.py # logs/server_status.json 忙闲状态（跨进程文件锁）
 │   │   ├── model_download.py # 模型清单与下载器（标准库实现）
-│   │   ├── connection/       # WebSocket：server_manager（起服务、端口检查）、ws_recv（收音频、分段）、ws_send（回结果）
-│   │   ├── worker/           # 识别子进程：process_manager、worker、model_loader、task_handler、pipeline、check_model、audio
+│   │   ├── connection/       # WebSocket：server_manager（起服务、端口检查）、ws_recv（收音频、分段）、ws_send（回结果）、pause_splitter（流式任务的停顿切句）
+│   │   ├── worker/           # 识别子进程：process_manager、worker、model_loader、task_handler、pipeline、streaming（流式任务的前缀续写）、check_model、audio
 │   │   ├── engines/          # 引擎：base（抽象接口）、factory、manager（对齐器懒加载代理）、language（语言映射）
 │   │   │   ├── qwen_asr_gguf/        # Qwen3-ASR 适配器 asr_engine.py + 推理内核 inference/（源自上游 Qwen3-ASR-GGUF，已裁剪）
 │   │   │   ├── force_aligner_gguf/   # ForcedAligner 适配器（推理内核共用 qwen_asr_gguf/inference）
@@ -77,7 +77,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 数据流：
 
 ```
-Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ AudioCache 按 seg_duration/seg_overlap 切片
+Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ AudioCache 按 seg_duration/seg_overlap 切片（流式任务按停顿切句）
    ─▶ queue_in ─▶ TaskHandler（按 task_id 缓冲，优先处理最新会话）─▶ TaskPipeline.process
    ─▶ queue_out ─▶ ws_send ──RecognitionMessage(JSON)──▶ Client
 ```
@@ -104,6 +104,12 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 每个片段：float32 字节 → numpy（< 0.1s 的空片段直接跳过）→ `QwenASREngine.decode_stream`（ONNX 编码器 → 拼 prompt embedding → llama.cpp 解码，温度 0.4、异常时升温重试，**同一段音频多次识别结果可能有细微差异**）→ `merge_by_text` 累积 `text`。
 文件任务（`source == 'file'`）调用 `ManagedAlignerProxy.align` 得到字级时间戳（首次使用时加载，闲置 `aligner_idle_timeout` 秒后卸载；编码器走 DirectML 时常驻不卸载，原因见 `engines/manager.py`）→ `merge_tokens_by_sequence_matcher` 累积 tokens/timestamps。
 最后一段：`TextFormatter.format`（ITN、中英空格）→ `sync_tokens_from_text` 把格式化结果同步回 tokens → 若无 tokens（麦克风任务）按字数均分时长生成时间戳。
+
+### 流式任务（`AudioMessage.streaming`，仅麦克风）
+
+客户端按住录音键时逐句上屏用。不按 `seg_duration` 切，`ws_recv` 用 `PauseSplitter`（因果能量 VAD，50ms 帧）在停顿处切句，每句提交一个片段（片段间无重叠）；`TaskPipeline._process_stream` 用 `StreamState` 做前缀续写：把前几句的音频连同本句送进模型、前几句的识别文字作 assistant 前缀，模型只续写本句。每句末尾的标点暂留，由下一句开头的标点决定；每句单独格式化后放进 `Result.delta` 发出，发出的文字不再改，`text` 是各 `delta` 的拼接。松手前的静音尾巴（已切出过句子时）标为 `silent` 不识别。参数、实验数据与取舍写在 `connection/pause_splitter.py`、`worker/streaming.py` 的文件头。
+
+同一任务的片段在 `TaskBuffer` 里先进先出，前缀依赖上一句的结果，所以必须按序处理；改调度时要保持这一点。
 
 ---
 
@@ -165,6 +171,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 - `seg_duration` / `seg_overlap` 的协议默认值是 15 / 2，但客户端实际发 60 / 4；分段在服务端 `ws_recv` 里做（见 [text_merge_algorithm.md](docs/text_merge_algorithm.md)）。
 - `context` 作为 Qwen3 的 system prompt；`language` 是统一语言代码（见 `engines/language.py`），`auto` 表示不指定。
 - 服务端每完成一个片段就回一条 `RecognitionMessage`（`is_final=False`），最后一条 `is_final=True`；主输出是 `text`，文件转录用 `tokens` / `timestamps`。
+- `streaming=True`（客户端流式上屏）：忽略 `seg_*`，每句回一条，新增文字在 `delta` 里（见上文「流式任务」）。旧客户端不发这个字段，行为不变；新客户端连旧服务端时收不到 `delta`，按整段处理。
 - WebSocket 子协议 `binary`，`max_size=None`。结果只发回提交任务的那个连接；连接断开后，其未处理的任务会被子进程丢弃。
 
 ---
@@ -184,6 +191,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 - 预期结果大致是“财联社1月7日电，从国家邮政局了解到，十四五以来，我国建成世界上规模最大、受益人数最多的寄递网络，邮政快递业业务年均增长10%。”。解码是采样的，标点和个别字可能不同，所以用 `--expect 子串` 检查稳定的部分。
 - `--source file`：触发对齐模型。时间戳范围应接近 0.3~16.3s；如果是 0~16.2s 的均分值，说明对齐模型没有生效。
 - `--seg-duration 6 --seg-overlap 2`：强制切成多段，用来测试拼接。
+- `--streaming`：流式任务，按真实时间每 50ms 发一块（约 17 秒）。应在发送过程中陆续收到 2～3 条「新增」，各条 `delta` 拼起来等于最终结果（脚本会检查），最终文本与整段识别基本相同。
 - `--json`：输出原始结果。
 
 ---
@@ -202,6 +210,8 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | ITN / 中英空格 | `core/tools/chinese_itn.py`、`core/tools/format_tools.py`、`formatter/text_formatter.py` |
 | 任务调度（多连接公平性、断连清理） | `worker/task_handler.py` |
 | 音频分段参数的服务端处理 | `connection/ws_recv.py` |
+| 流式任务的切句（停顿阈值、句长限制） | `connection/pause_splitter.py`；接入点在 `ws_recv._handle_streaming` |
+| 流式任务的前缀续写（窗口、前缀、暂留标点、逐段格式化） | `worker/streaming.py`、`worker/pipeline.py` 的 `_process_stream`；改完用 `smoke_test.py --streaming` 验证 |
 | 通信协议 | `core/protocol.py` + 两端收发代码（**Client 仓库同步修改**） |
 | 忙闲状态文件 | `core/server/runtime_status.py` 及调用点（`ws_recv.py`、`task_handler.py`） |
 | 换模型 / 换量化版本 | `config_server.py` 的 `ModelPaths` + `core/server/model_download.py` 的 `PACKAGES`（压缩包名、SHA-256、大小），同步更新 `models/README.md` |

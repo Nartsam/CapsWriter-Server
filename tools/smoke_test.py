@@ -9,6 +9,7 @@ python3 或项目环境都能跑，不需要装项目依赖。协议与 core/pro
     python tools/smoke_test.py                          # 默认发 tools/assets/demo.wav，mic 模式
     python tools/smoke_test.py --source file            # 文件转录模式（会触发对齐模型）
     python tools/smoke_test.py --seg-duration 6 --seg-overlap 2   # 强制多分段，测试拼接
+    python tools/smoke_test.py --streaming              # 流式上屏：按真实时间逐块发送，打印逐句增量
     python tools/smoke_test.py --host 10.0.0.2 --port 6000 --audio x.mp3   # 非 wav 需要 ffmpeg
 
 退出码：0 = 收到非空最终结果（且满足 --expect），1 = 失败。
@@ -23,6 +24,7 @@ import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 import uuid
 import wave
@@ -61,6 +63,7 @@ class MiniWebSocket:
         if ' 101 ' not in status_line:
             raise ConnectionError(f'握手失败: {status_line}')
         self._buffer = header.split(b'\r\n\r\n', 1)[1]
+        self._send_lock = threading.Lock()     # 流式测试时发送线程与回应 ping 的接收线程会同时发
 
     def _recv_exact(self, n):
         while len(self._buffer) < n:
@@ -84,7 +87,8 @@ class MiniWebSocket:
             header += struct.pack('!Q', n)
         mask = os.urandom(4)
         header += mask
-        self.sock.sendall(bytes(header) + _xor_mask(payload, mask))
+        with self._send_lock:
+            self.sock.sendall(bytes(header) + _xor_mask(payload, mask))
 
     def send_text(self, text):
         self._send_frame(0x1, text.encode('utf-8'))
@@ -192,7 +196,10 @@ def main():
     parser.add_argument('--source', choices=['mic', 'file'], default='mic')
     parser.add_argument('--seg-duration', type=float, default=60.0, help='与客户端默认一致：60s')
     parser.add_argument('--seg-overlap', type=float, default=4.0, help='与客户端默认一致：4s')
-    parser.add_argument('--chunk', type=float, default=1.0, help='每条消息携带的音频秒数')
+    parser.add_argument('--chunk', type=float, default=None,
+                        help='每条消息携带的音频秒数（默认 1s；--streaming 时 0.05s，与客户端一致）')
+    parser.add_argument('--streaming', action='store_true',
+                        help='流式上屏任务：按真实时间发送，检查各条 delta 拼起来等于最终文本')
     parser.add_argument('--context', default='')
     parser.add_argument('--language', default='auto')
     parser.add_argument('--timeout', type=float, default=120.0, help='等待最终结果的秒数')
@@ -208,22 +215,33 @@ def main():
     ws = MiniWebSocket(args.host, port, timeout=args.timeout)
     task_id = str(uuid.uuid4())
     t0 = time.time()
-    chunk_bytes = int(args.chunk * SAMPLE_RATE) * 4
+    chunk_sec = args.chunk or (0.05 if args.streaming else 1.0)
+    chunk_bytes = int(chunk_sec * SAMPLE_RATE) * 4
+    t_sent = None
 
     def send(data, is_final):
         ws.send_text(json.dumps({
             'task_id': task_id, 'source': args.source,
             'data': base64.b64encode(data).decode(), 'is_final': is_final,
             'time_start': t0, 'seg_duration': args.seg_duration, 'seg_overlap': args.seg_overlap,
-            'context': args.context, 'language': args.language,
+            'context': args.context, 'language': args.language, 'streaming': args.streaming,
         }, ensure_ascii=False))
 
-    for i in range(0, len(audio), chunk_bytes):
-        send(audio[i:i + chunk_bytes], False)
-    send(b'', True)
-    t_sent = time.time()
+    def send_all():
+        nonlocal t_sent
+        for n, i in enumerate(range(0, len(audio), chunk_bytes)):
+            if args.streaming:
+                # 按真实时间发送：模拟边录边发，切句与逐句回传才有意义
+                time.sleep(max(0.0, t0 + n * chunk_sec - time.time()))
+            send(audio[i:i + chunk_bytes], False)
+        send(b'', True)
+        t_sent = time.time()
+
+    sender = threading.Thread(target=send_all, daemon=True)
+    sender.start()
 
     final = None
+    deltas = []
     while final is None:
         raw = ws.recv_text()
         if raw is None:
@@ -231,10 +249,14 @@ def main():
         msg = json.loads(raw)
         if msg.get('task_id') != task_id:
             continue
+        deltas.append(msg.get('delta', ''))
         if msg.get('is_final'):
             final = msg
+        elif args.streaming:
+            print(f'  +{time.time() - t0:5.2f}s 新增: {msg.get("delta", "")!r}')
         else:
             print(f'  中间结果 ({msg.get("duration", 0):.2f}s): {msg.get("text", "")}')
+    sender.join()
     ws.close()
 
     if final is None:
@@ -243,6 +265,8 @@ def main():
 
     text = final.get('text', '')
     stamps = final.get('timestamps') or []
+    if args.streaming:
+        print(f'  +{time.time() - t0:5.2f}s 新增（最终）: {final.get("delta", "")!r}')
     print(f'最终结果: {text}')
     print(f'时长 {final.get("duration", 0):.2f}s，发送完成后 {time.time() - t_sent:.2f}s 收到；'
           f'tokens={len(final.get("tokens") or [])}，'
@@ -253,6 +277,13 @@ def main():
     if not text.strip():
         print('失败：最终文本为空')
         return 1
+    if args.streaming:
+        if len(deltas) < 2:
+            print('失败：没有收到逐句增量（服务端可能不支持流式，或音频里没有足够长的停顿）')
+            return 1
+        if ''.join(deltas) != text:
+            print(f'失败：各条 delta 拼起来与最终文本不一致：{"".join(deltas)!r}')
+            return 1
     if args.expect and args.expect not in text:
         print(f'失败：最终文本不包含 {args.expect!r}')
         return 1

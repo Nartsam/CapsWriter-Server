@@ -22,7 +22,7 @@
 改完代码至少：
 
 1. `ast.parse` 全部改动的 `.py`（Linux 也会运行的代码加 `feature_version=(3, 10)`），改了 `.sh` 就 `bash -n`。不要用 `py_compile`（会生成 `__pycache__`）；系统 Python 没有项目依赖，不能直接 `import core`。
-2. Windows：`start_server.exe --port 6100` 启动，另开终端 `python tools/smoke_test.py --port 6100`；加 `--source file` 测对齐，加 `--seg-duration 6 --seg-overlap 2` 测拼接（预期结果见 PROJECT_INDEX.md「冒烟测试」）。
+2. Windows：`start_server.exe --port 6100` 启动，另开终端 `python tools/smoke_test.py --port 6100`；加 `--source file` 测对齐，加 `--seg-duration 6 --seg-overlap 2` 测拼接，加 `--streaming` 测流式任务（预期结果见 PROJECT_INDEX.md「冒烟测试」）。
 3. 在 Windows 开发机上改了 Linux 相关代码：做完第 1 步的静态检查，把需要真机确认的行为写进 docs/DEV_NOTES.md「待验证」，由用户在 Linux 服务器上用 `./start_server.sh --port 6100` 加冒烟测试验证。
 
 ## 文档维护
