@@ -16,10 +16,12 @@ __version__ = '2.5'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ONNX 推理后端（音频编码器部分）：
-# - Windows：internal/ 里打包的是 onnxruntime-directml，只有 CPU / DML 可选
+# - Windows：internal/ 里打包的是 onnxruntime-directml，只有 DML / CPU 可选。
+#   上游默认 CPU（部分 AMD 显卡开 DML 反而更慢）；本仓库默认 DML，在 GTX 1080 Ti 上实测快 1.5~3 倍，
+#   换到其他显卡上若变慢，改回 'CPU'（数据见 docs/显卡加速.md）
 # - Linux：用 onnxruntime-gpu，走 CUDA
 # 请求的后端不可用时自动回退 CPU，并在日志里给出警告
-_DEFAULT_ONNX_PROVIDER = 'CPU' if sys.platform == 'win32' else 'CUDA'
+_DEFAULT_ONNX_PROVIDER = 'DML' if sys.platform == 'win32' else 'CUDA'
 
 
 # 服务端配置

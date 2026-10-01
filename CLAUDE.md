@@ -14,7 +14,7 @@
 - **兼容 Python 3.10（Linux）与 3.13（Windows 的 `internal/`）**：不要用 3.11+ 才有的语法和标准库（`tomllib`、`except*`、`typing.Self` 等）。尽量只用标准库；确需新依赖时，Linux 加进 `requirements-linux.txt`，Windows 把 cp313-win_amd64 版本放进 `internal/`，两边都要实测。
 - **`core/protocol.py`、`core/constants.py` 与 Client 仓库逐字相同**，改协议必须两边同步（Client 仓库需要改时告知用户）。
 - **仓库内容**：不要提交 `models/`、`logs/`、`__pycache__`/`.pyc`（`internal/` 除外）。`internal/` 按字节原样跟踪。Linux `.so` 别名是 git 符号链接，在 Windows 上是小文本文件，不要用普通文件覆盖。`.sh` 保持 LF 且带可执行位（`git add --chmod=+x`）；`.bat` 保持纯 ASCII + CRLF。
-- **本机上正运行着用户日常使用的服务端**（`start_server.exe`，端口 6000）。测试用其他端口（如 `--port 6100`），只结束自己启动的进程。
+- **本机上正运行着用户日常使用的服务端**（`start_server.exe`，端口 6000）。测试用其他端口（如 `--port 6100`），只结束自己启动的进程。同一时间只起一个测试实例：每个识别子进程约占 4GB 提交内存，三个实例同时运行曾使系统提交内存接近耗尽，其中一个子进程无声退出。
 - **不要在 WSL 里测试**（用户要求：曾占满 C 盘）。临时文件和测试副本也不要放 C 盘。
 
 ## 验证

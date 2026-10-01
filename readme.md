@@ -6,7 +6,7 @@ Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWrite
 
 - 完全离线，识别在本机/自己的服务器上完成
 - Windows 与 Linux 两套入口、同一份代码、相同的参数与行为
-- 显卡加速：LLM 解码走 llama.cpp Vulkan，音频编码器 Windows 用 CPU/DirectML、Linux 用 CUDA
+- 显卡加速：LLM 解码走 llama.cpp Vulkan，音频编码器 Windows 用 DirectML、Linux 用 CUDA
 
 ## 快速开始
 

@@ -112,7 +112,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 
 | 差异 | 位置 | Windows | Linux |
 |---|---|---|---|
-| ONNX 推理后端默认值 | `config_server.py` 的 `_DEFAULT_ONNX_PROVIDER` | `CPU`（onnxruntime-directml，另可选 `DML`） | `CUDA`（onnxruntime-gpu），原因见 [显卡加速.md](docs/显卡加速.md) |
+| ONNX 推理后端默认值 | `config_server.py` 的 `_DEFAULT_ONNX_PROVIDER` | `DML`（onnxruntime-directml，另可选 `CPU`） | `CUDA`（onnxruntime-gpu），原因见 [显卡加速.md](docs/显卡加速.md) |
 | 托盘与“重启”菜单 | `core/ui/tray.py` | 有 | 自动跳过 |
 | 子进程启动方式 | `multiprocessing` 默认值 | spawn：重新 import 配置，需再覆盖一次 | fork：会继承主进程的信号处理，子进程需恢复默认 |
 | 识别子进程内存回收 | `worker/worker.py` → `empty_working_set` | 模型加载后清空工作集 | 无 |
