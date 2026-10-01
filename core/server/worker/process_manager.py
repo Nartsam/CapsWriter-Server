@@ -2,13 +2,15 @@
 """
 识别子进程管理器 (ProcessManager)
 
-负责维护单机识别进程的生命周期，包括启动、模型加载监控、异常退出捕获。
+负责维护单机识别进程的生命周期，包括启动、模型加载监控、异常退出捕获（加载期间与服务期间）。
 """
 from __future__ import annotations
 import sys
 import os
 import queue
+import threading
 from multiprocessing import Process
+from multiprocessing.connection import wait
 from multiprocessing.managers import SyncManager
 from core.tools.signal_handler import init_manager_process
 from typing import TYPE_CHECKING
@@ -95,6 +97,22 @@ class ProcessManager:
         console.rule('[green3]开始服务')
         console.line()
 
+        threading.Thread(target=self._watch_worker, name='worker-watch', daemon=True).start()
+
+    def _watch_worker(self):
+        """
+        服务期间监视识别子进程。
+
+        子进程中途退出（崩溃、被系统杀掉等）后，主进程若继续运行，会照常接受连接、
+        却永远不返回结果。所以记录退出码后让服务端整体以非 0 退出码退出，
+        交给托管程序（asmgt、systemd 等）重启，不在进程内自行拉起。
+        """
+        wait([self._process.sentinel])
+        if not self.is_alive:   # stop() 主动结束的（退出 / 重启），不算异常
+            return
+        logger.error(f"识别子进程意外退出! ExitCode: {self._process.exitcode}，服务端随之退出（退出码 1）")
+        self.app.abort()
+
     def _handle_unexpected_exit(self):
         """处理子进程加载模型时的意外退出"""
         exit_code = self._process.exitcode
@@ -124,4 +142,9 @@ class ProcessManager:
                 logger.debug("子进程未响应优雅退出，执行强制终止")
                 self._process.terminate()
                 self._process.join(timeout=5)
+        elif self._process:
+            # 子进程已经不在了：发给它的数据再也没人读，Linux 上它还可能死在持有队列写锁时。
+            # 不取消的话，退出时 multiprocessing 会等后台线程把队列数据写完，进程卡住不退
+            self.app.state.queue_in.cancel_join_thread()
+            self.app.state.queue_out.cancel_join_thread()
             

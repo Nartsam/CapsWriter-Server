@@ -36,7 +36,7 @@ git clone <仓库地址> capswriter && cd capswriter
 | 参数注入 | `ASMGT_PORT` / `ASMGT_HOST` / `ASMGT_GPU` 映射为 `CAPSWRITER_PORT` / `CAPSWRITER_HOST` / `CAPSWRITER_GPU` |
 | 前台运行 | 最后一步 `exec` 成 Python 进程，不 fork 到后台；`PYTHONUNBUFFERED=1` |
 | 停止 | SIGTERM / SIGHUP 立即优雅退出（关闭 WebSocket、终止识别子进程）；Ctrl+C 需 1 秒内按两次 |
-| 失败即退出 | 端口被占用、模型缺失、参数非法都会在加载模型前以非 0 退出码退出（参数非法为 2） |
+| 失败即退出 | 端口被占用、模型缺失、参数非法都会在加载模型前以非 0 退出码退出（参数非法为 2）；运行中识别子进程意外退出（崩溃、被 OOM killer 杀掉）时，服务端以退出码 1 整体退出，由 asmgt 重启 |
 | 忙闲探针 | `logs/server_status.json` 中 `queued + processing > 0` 即 busy（WebSocket 服务，没有 HTTP 探针） |
 
 `server_status.json` 示例：`{"pid": 1234, "processing": 0, "queued": 0, "started_at": …, "state": "idle", "updated_at": …}`。对整个进程组发 SIGTERM 也能干净退出；主进程被 SIGKILL 时，识别子进程与 Manager 进程会在几秒内自行退出、释放显存。

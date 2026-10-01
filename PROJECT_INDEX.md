@@ -96,6 +96,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 
 - **退出**（托盘菜单、SIGTERM/SIGHUP、1 秒内两次 Ctrl+C）都走 `CapsWriterServer.stop()`：关闭 WebSocket（释放端口）→ 结束识别子进程并等它退出 → 卸载托盘 → 停止事件循环。
 - **重启**（托盘菜单，仅 Windows）：执行同一个 `stop()`，完成后由 `_finish()` 用原命令行拉起新实例。必须先退出再启动，原因见 `app.py` 的 `restart()`。Linux 的重启交给 asmgt。
+- **识别子进程中途退出**（崩溃、被系统杀掉）：`ProcessManager` 的监视线程发现后调用 `app.abort()`，走同一个 `stop()`，服务端以退出码 1 整体退出，由托管程序（asmgt 等）重启；进程内不自行拉起。双击运行时服务端直接结束，托盘图标消失。
 - 识别子进程和 Manager 进程在主进程消失后会自行退出，不残留、不占显存（`core/tools/signal_handler.py`）。
 
 ### 识别流水线（`worker/pipeline.py`）
@@ -140,7 +141,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 
 仅 `start_server.sh`：`ASMGT_PORT` / `ASMGT_HOST` / `ASMGT_GPU`（asmgt 注入）映射为上面的 `CAPSWRITER_*`；`CAPSWRITER_PYTHON` 指定解释器。
 
-退出码：0 正常；1 端口冲突 / 缺必需模型 / 子进程加载失败 / 参数值非法；2 未知参数（argparse）。
+退出码：0 正常；1 端口冲突 / 缺必需模型 / 识别子进程加载失败或中途退出 / 参数值非法；2 未知参数（argparse）。
 
 ---
 

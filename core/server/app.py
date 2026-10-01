@@ -27,12 +27,14 @@ class CapsWriterServer:
     """
     CapsWriter 服务端外观类
     
-    管理的外部接口极其简洁：start()；托盘菜单另外会调用 stop() / restart()。
+    管理的外部接口极其简洁：start()；托盘菜单另外会调用 stop() / restart()，
+    识别子进程中途退出时 ProcessManager 会调用 abort()。
     """
     def __init__(self):
         # 重启时要用同一条命令再启动一次；非冻结模式下 argv[0] 可能是相对路径，必须在切换目录前记下
         self._launch_cmd = launch.current_command()
         self._restart_requested = False
+        self._exit_code = 0                 # abort() 置为 1，由 start() 末尾交给 _finish()
         self._stopped = threading.Event()   # stop() 全部清理完成后置位
 
         # 确保正确的工作目录
@@ -86,13 +88,23 @@ class CapsWriterServer:
         # 3. 停止托盘图标
         self.tray_manager.stop()
 
-        # 4. 最后停止协程（需在其他资源释放之后）
-        self.loop.stop()
+        # 4. 最后停止协程（需在其他资源释放之后）。
+        # stop() 常在托盘线程、子进程监视线程里调用，直接 loop.stop() 不会唤醒阻塞中的事件循环
+        self.loop.call_soon_threadsafe(self.loop.stop)
 
         logger.info("服务端资源清理完成")
         self._stopped.set()
-        if not self._restart_requested:
+        if not self._restart_requested and not self._exit_code:
             console.print('[green4]再见！')
+
+    def abort(self):
+        """
+        无法继续服务时（识别子进程中途退出）：做与“退出”相同的清理，然后以退出码 1 结束，
+        由托管程序决定是否重启。双击运行时没有托管程序，托盘图标消失即表示服务已停止。
+        """
+        if not self.is_alive: return
+        self._exit_code = 1
+        self.stop()
 
     def restart(self):
         """
@@ -175,8 +187,8 @@ class CapsWriterServer:
 
         # 开启网络服务监听 (接管当前线程直至退出)
         try:
-            self.loop.run_until_complete(self.socket_manager.start()) 
+            self.loop.run_until_complete(self.socket_manager.start())
         except RuntimeError:
             pass
 
-        self._finish(0)
+        self._finish(self._exit_code)
