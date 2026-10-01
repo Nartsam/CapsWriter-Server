@@ -36,7 +36,7 @@ class ServerConfig:
 
     # 日志配置
     log_level = 'WARNING'        # 日志级别：'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-    aligner_idle_timeout = 10  # 对齐引擎空闲多少秒后自动释放显存 (0 表示不释放)
+    aligner_idle_timeout = 10  # 对齐引擎空闲多少秒后自动释放显存 (0 表示不释放；编码器走 DirectML 时一律常驻，见 core/server/engines/manager.py)
 
 
 class ModelPaths:

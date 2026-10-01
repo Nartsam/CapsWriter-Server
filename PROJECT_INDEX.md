@@ -102,7 +102,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 ### 识别流水线（`worker/pipeline.py`）
 
 每个片段：float32 字节 → numpy（< 0.1s 的空片段直接跳过）→ `QwenASREngine.decode_stream`（ONNX 编码器 → 拼 prompt embedding → llama.cpp 解码，温度 0.4、异常时升温重试，**同一段音频多次识别结果可能有细微差异**）→ `merge_by_text` 累积 `text`。
-文件任务（`source == 'file'`）调用 `ManagedAlignerProxy.align` 得到字级时间戳（首次使用时加载，闲置 `aligner_idle_timeout` 秒后卸载）→ `merge_tokens_by_sequence_matcher` 累积 tokens/timestamps。
+文件任务（`source == 'file'`）调用 `ManagedAlignerProxy.align` 得到字级时间戳（首次使用时加载，闲置 `aligner_idle_timeout` 秒后卸载；编码器走 DirectML 时常驻不卸载，原因见 `engines/manager.py`）→ `merge_tokens_by_sequence_matcher` 累积 tokens/timestamps。
 最后一段：`TextFormatter.format`（ITN、中英空格）→ `sync_tokens_from_text` 把格式化结果同步回 tokens → 若无 tokens（麦克风任务）按字数均分时长生成时间戳。
 
 ---
