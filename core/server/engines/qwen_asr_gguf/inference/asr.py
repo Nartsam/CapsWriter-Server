@@ -56,6 +56,7 @@ class QwenASREngine:
         self.model = llama.LlamaModel(llm_gguf, use_gpu=config.llm_use_gpu)
         self.embedding_table = llama.get_token_embeddings_gguf(llm_gguf)
         self.ctx = llama.LlamaContext(self.model, n_ctx=config.n_ctx, n_batch=4096, embeddings=False)
+        self.n_vocab = llama.llama_vocab_n_tokens(self.model.vocab)
 
         # 缓存 Token ID
         self.ID_IM_START = self.model.token_to_id("<|im_start|>")
@@ -71,20 +72,26 @@ class QwenASREngine:
         if self.verbose: print("--- [QwenASR] 引擎已关闭 ---")
 
     def _build_prompt_embd(self, audio_embd: np.ndarray, prefix_text: str, context: Optional[str], language: Optional[str]):
-        """构造用于 LLM 输入的 Embedding 序列 (区块化打包模式)"""
+        """
+        构造用于 LLM 输入的 Embedding 序列 (区块化打包模式)
+
+        格式按 Qwen ChatML：<|im_end|> 后带换行，没有 context 时 system 留空。
+        指定语言时 assistant 以「language X<asr_text>」开头，prefix_text 接在后面；
+        不指定（auto）时只到「assistant\\n」，由模型自己先写语言行，prefix_text 之后再接（见 _decode）。
+        上游的写法是 auto 时直接以 <asr_text> 开头、system 默认「You are a helpful assistant.」、不带换行：
+        个别录音会写成繁体（同一段录音采样 100 次 13 次，现在 0 次），句尾也偶尔被吞字。
+        """
         def tk(t): return self.model.tokenize(t)
+        nl = tk("\n")
 
         # 1. 区块 A: 音频之前的所有内容 (System + User Header)
-        prefix_str = f"system\n{context or 'You are a helpful assistant.'}"
-        prefix_tokens = [self.ID_IM_START] + tk(prefix_str) + [self.ID_IM_END] + \
+        prefix_tokens = [self.ID_IM_START] + tk(f"system\n{context or ''}") + [self.ID_IM_END] + nl + \
                         [self.ID_IM_START] + tk("user\n") + [self.ID_AUDIO_START]
-        
-        # 2. 区块 B: 音频之后的所有内容 (Instruction + Assistant Header + History)
-        suffix_head = f"assistant\n"
-        if language: suffix_head += f"language {language}"
-        
-        suffix_tokens = [self.ID_AUDIO_END] + [self.ID_IM_END] + \
-                        [self.ID_IM_START] + tk(suffix_head) + [self.ID_ASR_TEXT] + tk(prefix_text)
+
+        # 2. 区块 B: 音频之后的所有内容 (Assistant Header + History)
+        suffix_tokens = [self.ID_AUDIO_END, self.ID_IM_END] + nl + [self.ID_IM_START] + tk("assistant\n")
+        if language:
+            suffix_tokens += tk(f"language {language}") + [self.ID_ASR_TEXT] + tk(prefix_text)
 
         # 3. 统计并拼接
         n_pre, n_aud, n_suf = len(prefix_tokens), audio_embd.shape[0], len(suffix_tokens)
@@ -93,33 +100,77 @@ class QwenASREngine:
         total_embd[:n_pre] = self.embedding_table[prefix_tokens]
         total_embd[n_pre : n_pre + n_aud] = audio_embd
         total_embd[n_pre + n_aud:] = self.embedding_table[suffix_tokens]
-        
+
         return total_embd
+
+    def _write_language_line(self) -> str:
+        """
+        auto 时让模型（贪心）写出「language X<asr_text>」，返回 X
+
+        没写到 <asr_text> 就结束了也算 'None'（没有人声）；写了 8 个 token 还没写到就替它补上
+        """
+        tokens = []
+        for _ in range(8):
+            logits = np.ctypeslib.as_array(self.ctx.get_logits_ith(-1), shape=(self.n_vocab,))
+            t = int(np.argmax(logits))
+            if t in (self.model.eos_token, self.ID_IM_END):
+                return 'None'
+            self.ctx.decode_token(t)
+            if t == self.ID_ASR_TEXT:
+                break
+            tokens.append(t)
+        else:
+            self.ctx.decode_token(self.ID_ASR_TEXT)
+        return self.model.detokenize(tokens).replace('language', '').strip()
+
+    def _append_text(self, text: str):
+        """把文字作为 assistant 已写出的内容接到 KV Cache 末尾（位置编码与 prefill 里的文字相同）"""
+        tokens = self.model.tokenize(text) if text else []
+        if not tokens:
+            return
+        n, n0 = len(tokens), self.ctx.n_past()
+        pos = np.arange(n0, n0 + n, dtype=np.int32)
+        batch = llama.LlamaBatch(n * 4, self.model.n_embd, 1)
+        batch.set_embd(self.embedding_table[tokens], pos=np.concatenate([pos, pos, pos, np.zeros(n, dtype=np.int32)]))
+        self.ctx.decode(batch)
+        del batch
 
     def _decode(
         self, 
         full_embd: np.ndarray,
         prefix_text: str, 
         rollback_num: int,
-        is_last_chunk: bool = False, 
-        temperature: float = 0.4, 
-        streaming: bool = True, 
+        is_last_chunk: bool = False,
+        temperature: float = 0.4,
+        streaming: bool = True,
+        detect_language: bool = False,
     ) -> DecodeResult:
-        """底层方法：执行单次 LLM 生成循环（物理推理）"""
+        """
+        底层方法：执行单次 LLM 生成循环（物理推理）
+
+        detect_language: prompt 停在「assistant\\n」（auto，见 _build_prompt_embd），先让模型写语言行，
+            再接上 prefix_text；模型判断为 None（没有人声）时直接返回空结果
+        """
         result = DecodeResult()
-        
+
         total_len = full_embd.shape[0]
         pos_base = np.arange(0, total_len, dtype=np.int32)
         pos_arr = np.concatenate([pos_base, pos_base, pos_base, np.zeros(total_len, dtype=np.int32)])
         batch = llama.LlamaBatch(max(total_len * 4, 8192), self.model.n_embd, 1)
         batch.set_embd(full_embd, pos=pos_arr)
-        
+
         # 1. Prefill
         self.ctx.clear_kv_cache()
         t_pre_start = time.time()
         self.ctx.decode(batch)
+        if detect_language:
+            if self._write_language_line() == 'None':
+                result.t_prefill = time.time() - t_pre_start
+                result.n_prefill = total_len
+                return result
+            self._append_text(prefix_text)
         prefill_time = time.time() - t_pre_start
-        
+
         # 2. Generation Loop（使用新采样器和随机种子）
         t_gen_start = time.time()
         n_gen_tokens = 0
@@ -207,13 +258,15 @@ class QwenASREngine:
         prefix_text: str, 
         rollback_num: int, 
         is_last_chunk: bool, 
-        temperature: float, 
-        streaming: bool = True, 
+        temperature: float,
+        streaming: bool = True,
+        detect_language: bool = False,
     ) -> DecodeResult:
-        """带熔断加温重试的高层推理封装"""
+        """带熔断加温重试的高层推理封装（detect_language 见 _decode）"""
         self.bias.refresh()
         for i in range(4):
-            res = self._decode(full_embd, prefix_text, rollback_num, is_last_chunk, temperature, streaming=streaming)
+            res = self._decode(full_embd, prefix_text, rollback_num, is_last_chunk, temperature,
+                               streaming=streaming, detect_language=detect_language)
             if not res.is_aborted:
                 break
             temperature += 0.3
@@ -321,7 +374,8 @@ class QwenASREngine:
             full_embd = self._build_prompt_embd(combined_audio, prefix_text, context, language)
             
             # 带熔断加温重试的解码调用
-            res = self._safe_decode(full_embd, prefix_text, rollback_num, was_last, temperature)
+            res = self._safe_decode(full_embd, prefix_text, rollback_num, was_last, temperature,
+                                    detect_language=not language)
 
             # 更新记忆与统计
             all_segments[i].text = res.text

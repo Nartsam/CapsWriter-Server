@@ -171,7 +171,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 
 - 客户端发 `AudioMessage`（JSON 文本帧），`data` 是 base64 编码的 float32 16kHz 单声道 PCM。
 - `seg_duration` / `seg_overlap` 的协议默认值是 15 / 2，但客户端实际发 60 / 4；分段在服务端 `ws_recv` 里做（见 [text_merge_algorithm.md](docs/text_merge_algorithm.md)）。
-- `context` 作为 Qwen3 的 system prompt；`language` 是统一语言代码（见 `engines/language.py`），`auto` 表示不指定。
+- `context` 作为 Qwen3 的 system prompt；`language` 是统一语言代码（见 `engines/language.py`），`auto` 表示不指定：模型先写出语言行再写正文，判断为没有人声时返回空（见 `inference/asr.py` 的 `_build_prompt_embd`）。
 - 服务端每完成一个片段就回一条 `RecognitionMessage`（`is_final=False`），最后一条 `is_final=True`；主输出是 `text`，文件转录用 `tokens` / `timestamps`。
 - `streaming=True`（客户端流式上屏）：忽略 `seg_*`，每句回一条，新增文字在 `delta` 里（见上文「流式任务」）。旧客户端不发这个字段，行为不变；新客户端连旧服务端时收不到 `delta`，按整段处理。
 - WebSocket 子协议 `binary`，`max_size=None`。结果只发回提交任务的那个连接；连接断开后，其未处理的任务会被子进程丢弃。

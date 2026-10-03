@@ -82,8 +82,9 @@ class QwenASREngine(BaseASREngine):
             prefix_text=prefix_text, 
             rollback_num=5, 
             is_last_chunk=True, 
-            temperature=temperature, 
-            streaming=False, 
+            temperature=temperature,
+            streaming=False,
+            detect_language=not mapped_lang,
         )
 
         # 5. 更新结果

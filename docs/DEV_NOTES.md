@@ -5,7 +5,7 @@
 
 ## 待验证
 
-- [ ] **Linux 上的少加逗号与服务端热词**（2026-10-03）：Windows 上用 249 段真实录音回归过（关闭这两项时输出与改动前逐字相同）；Linux 只做了静态检查。热词的试探解码要回滚 KV Cache，用到 `llama_memory_seq_rm` / `llama_memory_seq_pos_max`（`libllama.so` 里有这两个符号）。用 `./start_server.sh --port 6100` 跑三种冒烟测试和 `--streaming`，日志里不应有报错。
+- [ ] **Linux 上的少加逗号、服务端热词与新提示词格式**（2026-10-03）：Windows 上用 249 段真实录音回归过；Linux 只做了静态检查。热词的试探解码要回滚 KV Cache，用到 `llama_memory_seq_rm` / `llama_memory_seq_pos_max`（`libllama.so` 里有这两个符号）。用 `./start_server.sh --port 6100` 跑三种冒烟测试和 `--streaming`，日志里不应有报错。
 - [ ] **Linux 上的流式任务**（2026-10-01）：Windows 上 `smoke_test.py --streaming` 与 42 段真实录音重放都已通过；Linux 只做了静态检查，用 `./start_server.sh --port 6100` 加 `--streaming` 冒烟测试确认。
 - [ ] **真实 Linux 服务器**（2026-09-28）：WSL（没有 Vulkan）里已验证 clone → `setup_linux.sh` → 下载模型 → 启动 → 三种冒烟测试 → 信号与进程退出。还没验证的：Vulkan GPU 解码、在 asmgt 里实际托管、`download_models.sh`（2026-09-29 新增，只做过静态检查）。按 [LINUX.md](LINUX.md)「从旧部署迁移」走一遍即可。
 - [ ] **Linux 上识别子进程中途退出**（2026-10-01）：`kill -9 <识别子进程 PID>` 后，服务端应记录 `识别子进程意外退出` 并以退出码 1 退出，asmgt 随后重启。
@@ -16,6 +16,7 @@
 
 - **DirectML 会话被释放后识别子进程崩溃**（2026-10-01）：对齐模型闲置卸载（销毁它的 DML 会话）后，识别引擎下一次编码在 `onnxruntime_pybind11_state.pyd` 里访问冲突（0xc0000005），服务端随之以退出码 1 退出；文件转录 → 等 10 秒 → 任意麦克风请求可稳定复现。根因在 onnxruntime-directml 内部，未修；现在对齐编码器走 DML 时常驻不卸载（`engines/manager.py`），代价是第一次文件转录后多占约 0.5GB 显存。
 - **识别结果有随机性**（2026-09-28）：Qwen3 解码温度 0.4（采样），同一段音频多次识别可能在标点或个别字上不同。
+- **客户端指定语言后，没说话的录音会输出「嗯。」**（2026-10-03）：249 段里 16 段静音录音全部如此；auto 时模型会先判断出没有人声，返回空。只说中文夹英文单词时用 auto 即可，指定 Chinese 并不能多认出英文。
 - **模型几乎不认识的同音词，服务端热词翻不过来**（2026-10-03）：例如「立绘」在「例会」的位置上低 16~20（log 概率），加分大到能翻过来时已等于机械替换，只能靠客户端 `hot-rule.txt` 按语境替换。
 - **对齐模型的 LLM 走 CPU**（2026-10-01 更新）：`ForceAlignerGGUFArgs.llm_use_gpu = False`（上游默认），16 秒音频的文件任务在 Windows 上首次约 8.5s（含加载对齐模型），对齐模型还没被释放时约 4.6s；麦克风任务不受影响。
 - **默认日志级别 WARNING**（2026-09-28）：llama.cpp 的 Vulkan 设备、ONNX 实际后端等信息是 INFO 级别，排查性能问题时先把 `log_level` 改为 `'INFO'`。
