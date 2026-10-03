@@ -88,6 +88,9 @@ class ASREngineConfig:
     chunk_size: float = 40.0    # 每个片段 40s，对应 800 个 token
     memory_num: int = 1         # 记忆一个片段，转录一个片段，对应 1600 个 token
     verbose: bool = True
+    comma_drop_margin: float = 0.0  # 弱逗号只删不换的阈值，0 关闭（见 biasing.py）
+    hotword_file: str = ''          # 服务端热词文件，空字符串关闭
+    hotword_bonus: float = 4.0      # 热词默认加分
     enable_aligner: bool = False
     align_config: Optional[AlignerConfig] = None
 

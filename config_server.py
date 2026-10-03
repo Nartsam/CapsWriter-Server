@@ -87,6 +87,11 @@ class Qwen3ASRGGUFArgs:
     dml_pad_to = 30             # 开启 DirectML 加速时，短音频统一填充到指定长度，有加速效果
     verbose = False
 
+    # 解码干预（原理与实测数据见 core/server/engines/qwen_asr_gguf/inference/biasing.py）
+    comma_drop_margin = 4.0     # 少加逗号：逗号不比最可能的字明显强时（差距小于此值）不加标点，只删不换；越大逗号越少，建议 0~6，0 关闭
+    hotword_file = 'hot-server.txt'  # 服务端热词：提高这些词被识别出来的概率（不是替换），保存后下次识别即生效；留空关闭
+    hotword_bonus = 4.0         # 热词默认加分（文件里可逐词指定），超过 8 容易把相近的词也改成热词
+
 
 class ForceAlignerGGUFArgs:
     """Force-Aligner-GGUF 模型参数配置"""

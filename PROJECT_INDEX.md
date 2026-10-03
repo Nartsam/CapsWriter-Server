@@ -30,6 +30,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 ├── download_models.sh        # 下载模型（Linux）= ./start_server.sh --download-models
 ├── requirements-linux.txt    # Linux 依赖（Windows 的依赖在 internal/ 里）
 ├── config_server.py          # 唯一的配置文件（两平台共用）
+├── hot-server.txt            # 服务端热词（提高概率、不替换），保存后下次识别即生效；格式见文件头
 ├── internal/                 # Windows 冻结运行时：Python 3.13 标准库 .pyc + 第三方库
 ├── core/
 │   ├── __init__.py           # colorama 初始化，导出 logger 工具
@@ -102,6 +103,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 ### 识别流水线（`worker/pipeline.py`）
 
 每个片段：float32 字节 → numpy（< 0.1s 的空片段直接跳过）→ `QwenASREngine.decode_stream`（ONNX 编码器 → 拼 prompt embedding → llama.cpp 解码，温度 0.4、异常时升温重试，**同一段音频多次识别结果可能有细微差异**）→ `merge_by_text` 累积 `text`。
+解码的每一步先经过 `inference/biasing.py` 的 `DecodeBias`：弱逗号只删不换（少加逗号）、`hot-server.txt` 热词的词级先验（试探写完整个词，比较后采纳或回滚 KV Cache）。原理与实测数据在该文件头。
 文件任务（`source == 'file'`）调用 `ManagedAlignerProxy.align` 得到字级时间戳（首次使用时加载，闲置 `aligner_idle_timeout` 秒后卸载；编码器走 DirectML 时常驻不卸载，原因见 `engines/manager.py`）→ `merge_tokens_by_sequence_matcher` 累积 tokens/timestamps。
 最后一段：`TextFormatter.format`（ITN、中英空格）→ `sync_tokens_from_text` 把格式化结果同步回 tokens → 若无 tokens（麦克风任务）按字数均分时长生成时间戳。
 
@@ -158,7 +160,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | `ServerConfig` | `addr`、`port`（字符串）、`format_num`（中文数字转阿拉伯数字）、`format_spell`（中英空格）、`enable_tray`、`log_level`、`aligner_idle_timeout` |
 | `ModelPaths` | 模型文件路径（相对项目根目录；`CapsWriterServer.__init__` 会 chdir 到项目根） |
 | `ModelDownload` | `base_url`：模型压缩包下载地址前缀（可换镜像） |
-| `Qwen3ASRGGUFArgs` | 识别引擎参数，**所有公开属性会原样作为关键字参数传给 `ASREngineConfig`**，新增属性必须同时是该 dataclass 的字段（辅助变量用下划线开头） |
+| `Qwen3ASRGGUFArgs` | 识别引擎参数（含 `comma_drop_margin` 少加逗号、`hotword_file` / `hotword_bonus` 服务端热词），**所有公开属性会原样作为关键字参数传给 `ASREngineConfig`**，新增属性必须同时是该 dataclass 的字段（辅助变量用下划线开头） |
 | `ForceAlignerGGUFArgs` | 对齐引擎参数，同上，对应 `AlignerConfig` |
 
 ---
@@ -204,6 +206,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | 新增启动参数 / 环境变量 | `core/server/launch.py`（`parse_args` / `export_args` / `apply_overrides`），并更新本文档“启动参数与环境变量”；影响 Linux 部署的同步 `docs/LINUX.md` |
 | ONNX 后端、GPU 加速开关 | `config_server.py` 的 `*Args.onnx_provider` / `llm_use_gpu`；Provider 选择逻辑在 `engines/qwen_asr_gguf/inference/encoder.py` |
 | Qwen3 解码参数（温度、prompt 结构、上下文长度） | `engines/qwen_asr_gguf/asr_engine.py`（`decode_stream`）、`inference/asr.py`（`_build_prompt_embd` / `_decode`）、`config_server.py` 的 `n_ctx` / `chunk_size` |
+| 标点多少、服务端热词 | `inference/biasing.py`（规则与实测数据在文件头）、`config_server.py` 的 `comma_drop_margin` / `hotword_*`、`hot-server.txt`；KV Cache 回滚用 `engines/llama/llama.py` 的 `LlamaContext.truncate` |
 | 语言代码映射 | `engines/language.py` |
 | 识别流水线（文件任务对齐、最终格式化） | `worker/pipeline.py` |
 | 分段拼接算法 | `merger/text_merger.py`、`merger/token_merger.py`，同步更新 `docs/text_merge_algorithm.md` |

@@ -13,6 +13,7 @@ from typing import Optional, List
 from .schema import MsgType, StreamingMessage, DecodeResult, ASREngineConfig, TranscribeResult, ForcedAlignItem, ForcedAlignResult
 from .utils import normalize_language_name, validate_language
 from .encoder import QwenAudioEncoder
+from .biasing import DecodeBias
 from ...llama import llama
 
 @dataclasses.dataclass
@@ -62,6 +63,9 @@ class QwenASREngine:
         self.ID_AUDIO_START = self.model.token_to_id("<|audio_start|>")
         self.ID_AUDIO_END = self.model.token_to_id("<|audio_end|>")
         self.ID_ASR_TEXT = self.model.token_to_id("<asr_text>")
+
+        # 解码干预：弱逗号只删不换、服务端热词（见 biasing.py）
+        self.bias = DecodeBias(self.model, config.comma_drop_margin, config.hotword_file, config.hotword_bonus)
 
     def shutdown(self):
         if self.verbose: print("--- [QwenASR] 引擎已关闭 ---")
@@ -127,13 +131,30 @@ class QwenASREngine:
         # 每次解码使用新的随机种子
         seed = int(np.random.randint(0, 2**31 - 1))
         sampler = llama.LlamaSampler(temperature=temperature, seed=seed)
-        last_sampled_token = sampler.sample(self.ctx.ptr)
+        bias = self.bias if self.bias.active else None
+        if bias:
+            bias.begin(prefix_text)
+        forced = deque()    # 已采纳的热词还没写入的部分
+
+        def next_token():
+            if forced:
+                return forced.popleft()
+            if bias:
+                path = bias.step(self.ctx)
+                if path:
+                    forced.extend(path[1:])
+                    return path[0]
+            return sampler.sample(self.ctx.ptr)
+
+        last_sampled_token = next_token()
         for _ in range(512): # Max new tokens per chunk
             if last_sampled_token in [self.model.eos_token, self.ID_IM_END]:
                 break
             
             if self.ctx.decode_token(last_sampled_token) != 0:
                     break
+            if bias:
+                bias.push(last_sampled_token)
             
             display_queue.append(last_sampled_token)
             if len(display_queue) > rollback_num:
@@ -150,7 +171,7 @@ class QwenASREngine:
                     result.is_aborted = True
                     break
             
-            last_sampled_token = sampler.sample(self.ctx.ptr)
+            last_sampled_token = next_token()
             n_gen_tokens += 1
             
         gen_time = time.time() - t_gen_start
@@ -190,6 +211,7 @@ class QwenASREngine:
         streaming: bool = True, 
     ) -> DecodeResult:
         """带熔断加温重试的高层推理封装"""
+        self.bias.refresh()
         for i in range(4):
             res = self._decode(full_embd, prefix_text, rollback_num, is_last_chunk, temperature, streaming=streaming)
             if not res.is_aborted:

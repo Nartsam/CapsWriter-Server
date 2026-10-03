@@ -137,6 +137,8 @@ llama_vocab_eos = None
 llama_token_to_piece = None
 llama_get_memory = None
 llama_memory_clear = None
+llama_memory_seq_rm = None
+llama_memory_seq_pos_max = None
 llama_model_n_embd = None
 
 # Sampler
@@ -189,7 +191,7 @@ def bind_llama_lib():
     global llama_context_default_params, llama_init_from_model, llama_free
     global llama_batch_init, llama_batch_free, llama_batch_get_one
     global llama_decode, llama_get_logits, llama_get_logits_ith, llama_get_embeddings, llama_tokenize
-    global llama_get_memory, llama_memory_clear, llama_model_n_embd
+    global llama_get_memory, llama_memory_clear, llama_memory_seq_rm, llama_memory_seq_pos_max, llama_model_n_embd
     global llama_vocab_n_tokens, llama_vocab_eos, llama_token_to_piece
     global llama_sampler_chain_default_params, llama_sampler_chain_init, llama_sampler_chain_add
     global llama_sampler_init_greedy, llama_sampler_init_dist, llama_sampler_init_temp
@@ -339,6 +341,14 @@ def bind_llama_lib():
     llama_memory_clear = llama.llama_memory_clear
     llama_memory_clear.argtypes = [ctypes.c_void_p, ctypes.c_bool]
     llama_memory_clear.restype = None
+
+    llama_memory_seq_rm = llama.llama_memory_seq_rm
+    llama_memory_seq_rm.argtypes = [ctypes.c_void_p, llama_seq_id, llama_pos, llama_pos]
+    llama_memory_seq_rm.restype = ctypes.c_bool
+
+    llama_memory_seq_pos_max = llama.llama_memory_seq_pos_max
+    llama_memory_seq_pos_max.argtypes = [ctypes.c_void_p, llama_seq_id]
+    llama_memory_seq_pos_max.restype = llama_pos
 
     # Sampler
     llama_sampler_chain_default_params = llama.llama_sampler_chain_default_params
@@ -560,6 +570,14 @@ class LlamaContext:
     def clear_kv_cache(self):
         mem = llama_get_memory(self.ptr)
         llama_memory_clear(mem, True)
+
+    def n_past(self, seq_id: int = 0) -> int:
+        """序列在 KV Cache 中已有的长度（下一个 token 的位置）"""
+        return llama_memory_seq_pos_max(llama_get_memory(self.ptr), seq_id) + 1
+
+    def truncate(self, n: int, seq_id: int = 0):
+        """丢弃 KV Cache 中位置 >= n 的部分（试探解码后回滚用）"""
+        llama_memory_seq_rm(llama_get_memory(self.ptr), seq_id, n, -1)
 
     def __del__(self):
         if hasattr(self, 'ptr') and self.ptr:

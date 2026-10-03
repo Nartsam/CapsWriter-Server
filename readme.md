@@ -35,6 +35,12 @@ start_server.exe / ./start_server.sh  [--host ADDR] [--port N] [--gpu N] [--down
 
 客户端连接地址：`ws://<服务端IP>:<端口>`（在 Client 仓库的 `config_client.py` 中配置）。
 
+### 少加逗号与服务端热词
+
+- **逗号太多**：调大 `config_server.py` 的 `comma_drop_margin`（默认 4，建议 0~6，0 关闭）。只会去掉模型本来就拿不准的逗号，不会把逗号换成句号。
+- **常用词总被识别成同音词**：把词写进 [`hot-server.txt`](hot-server.txt)，每行一个，保存后下一次识别即生效。它只是提高这个词的概率，不做替换；写法、加分和不适合的情况见文件开头的说明。
+- 改 `config_server.py` 后需要重启服务端（托盘菜单“重启”）；改 `hot-server.txt` 不需要。
+
 ## 验证服务是否正常
 
 ```bash
