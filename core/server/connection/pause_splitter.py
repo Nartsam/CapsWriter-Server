@@ -12,6 +12,14 @@
 worker/streaming.py 的前缀续写，用字差异 1.9%（整段识别两次互比为 0.6%），对人工
 标准答案的字错率与整段识别相同，长录音松手后的等待从约 2.9s 降到约 0.4s。
 停顿阈值改大切得更少、上屏更慢，改小则碎句增多。
+
+噪声底的上升要限速（NOISE_RISE）。连续说话超过约 4s、窗口里的停顿不到 1s 时，第 20 百分位
+会落在说话的音量上，句尾较轻的字（如拖长的「歧义」的「义」，比真实底噪高 20dB 以上）就被
+当成静音：句子切在字的中间，这个字没被识别。切点之后剩下的那一截也判不出语音，于是停多久都
+不切（等到下一句才和后面的话一起上屏），直接松手时它又被当作静音尾巴跳过（丢字）。
+限速为每秒 1dB、下降不限后，用 2026-10 的 582 段真实录音（固定随机种子，前后两版逐段对比）
+回归：135 段切点有变化，其中 78 秒以内的 131 段用字差异从 1.17% 降到 0.92%，两例松手丢字修复，
+总句数从 708 变为 685。代价是背景噪声突然变大时，噪声底要十几秒才能跟上，这段时间里切得偏少。
 """
 
 from collections import deque
@@ -34,6 +42,7 @@ class PauseSplitter:
     DELTA_DB = 15.0                 # 帧能量高于噪声底多少 dB 算语音
     NOISE_WIN = 100                 # 噪声底估计窗口：最近 5s 的帧
     NOISE_PCT = 20                  # 窗口内取第 20 百分位作噪声底
+    NOISE_RISE = 0.05               # 噪声底每帧最多上升 0.05dB（每秒 1dB），下降不限；原因见文件头
     FLOOR_DB = -80.0                # 帧能量下限：数字静音（约 -97dB）会把噪声底拉得过低
 
     MIN_SIL = 0.6                   # 停顿多长才切
@@ -49,6 +58,7 @@ class PauseSplitter:
     def __init__(self):
         self._rest = np.zeros(0, dtype=np.float32)        # 不足一帧的尾巴
         self._db = deque(maxlen=self.NOISE_WIN + 1)       # 最近各帧能量（跨句连续）
+        self._noise = None                                # 上一帧的噪声底（跨句连续）
         self._seg_frames = 0
         self._sil_run = 0
         self._speech_frames = 0
@@ -79,6 +89,9 @@ class PauseSplitter:
         for e in np.maximum(dbs, self.FLOOR_DB):
             self._db.append(e)
             noise = np.percentile(self._db, self.NOISE_PCT)
+            if self._noise is not None:
+                noise = min(noise, self._noise + self.NOISE_RISE)
+            self._noise = noise
             if e > noise + self.DELTA_DB:
                 self._sil_run = 0
                 self._speech_frames += 1
