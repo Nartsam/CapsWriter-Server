@@ -6,7 +6,7 @@
 
 1. [PROJECT_INDEX.md](PROJECT_INDEX.md) — 项目地图：架构、跨模块约束、平台差异、启动参数、协议、常见修改指南
 2. [docs/DEV_NOTES.md](docs/DEV_NOTES.md) — 当前状态：待验证、已知问题、仍然有效的决策
-3. 按需：[docs/LINUX.md](docs/LINUX.md)（Linux 部署 / asmgt）、[docs/显卡加速.md](docs/显卡加速.md)、[docs/text_merge_algorithm.md](docs/text_merge_algorithm.md)、[models/README.md](models/README.md)、[llama.cpp 运行库](core/server/engines/llama/bin/README.md)
+3. 按需：[docs/Linux部署.md](docs/Linux部署.md)（Linux 部署 / asmgt）、[docs/显卡加速.md](docs/显卡加速.md)、[docs/分段拼接算法.md](docs/分段拼接算法.md)、[models/README.md](models/README.md)、[llama.cpp 运行库](core/server/engines/llama/bin/README.md)
 
 ## 硬性约束
 
@@ -31,7 +31,7 @@
 
 | 内容 | 归属 |
 |---|---|
-| 给人看的操作步骤 | [readme.md](readme.md)（Windows 快速开始）、[docs/LINUX.md](docs/LINUX.md)（Linux 部署与运维）、[models/README.md](models/README.md)（模型） |
+| 给人看的操作步骤 | [readme.md](readme.md)（Windows 快速开始）、[docs/Linux部署.md](docs/Linux部署.md)（Linux 部署与运维）、[models/README.md](models/README.md)（模型） |
 | 架构、模块位置、跨模块约束、平台差异、启动参数、修改指南 | [PROJECT_INDEX.md](PROJECT_INDEX.md) |
 | 只和某段代码有关的坑与原因 | 那段代码的注释 |
 | 待验证、已知问题、仍然有效的决策与待办 | [docs/DEV_NOTES.md](docs/DEV_NOTES.md)，完成或失效就删除 |

@@ -21,7 +21,7 @@ Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWrite
 
 ### Linux（NVIDIA 显卡）
 
-安装环境 → 下载模型 → 启动，见 [docs/LINUX.md](docs/LINUX.md)（含 asmgt 托管与从旧部署迁移）。
+安装环境 → 下载模型 → 启动，见 [docs/Linux部署.md](docs/Linux部署.md)（含 asmgt 托管与从旧部署迁移）。
 
 ## 配置与启动参数
 
@@ -53,11 +53,11 @@ python tools/smoke_test.py --host 10.0.0.2 --port 6000 --source file
 | 文档 | 内容 |
 |---|---|
 | [PROJECT_INDEX.md](PROJECT_INDEX.md) | 项目结构与架构（开发/AI Agent 入口） |
-| [docs/LINUX.md](docs/LINUX.md) | Linux 部署、asmgt、故障排查 |
+| [docs/Linux部署.md](docs/Linux部署.md) | Linux 部署、asmgt、故障排查 |
 | [docs/热词同步.md](docs/热词同步.md) | 独立 Git 配置仓库、跨电脑同步与冲突处理 |
 | [docs/显卡加速.md](docs/显卡加速.md) | GPU 加速配置 |
 | [models/README.md](models/README.md) | 模型下载与目录结构 |
-| [docs/text_merge_algorithm.md](docs/text_merge_algorithm.md) | 长音频分段拼接算法 |
+| [docs/分段拼接算法.md](docs/分段拼接算法.md) | 长音频分段拼接算法 |
 | [docs/DEV_NOTES.md](docs/DEV_NOTES.md) | 开发笔记：决策、已知问题、待办 |
 
 ## 常见问题

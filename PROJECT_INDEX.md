@@ -13,7 +13,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 | 平台 | 入口 | Python 运行时 | 用途 |
 |---|---|---|---|
 | Windows 10/11 | `start_server.exe`（双击，最小化到托盘） | `internal/`：上游打包好的 Python 3.13 冻结运行时 | 本机日常使用 |
-| Linux + NVIDIA | `start_server.sh` → `start_server.py` | `setup_linux.sh` 建的 conda/venv 环境（Python ≥ 3.10） | 服务器，由 asmgt 托管（见 [docs/LINUX.md](docs/LINUX.md)） |
+| Linux + NVIDIA | `start_server.sh` → `start_server.py` | `setup_linux.sh` 建的 conda/venv 环境（Python ≥ 3.10） | 服务器，由 asmgt 托管（见 [docs/Linux部署.md](docs/Linux部署.md)） |
 
 两个入口都只执行 `CapsWriterServer().start()`，其余代码全部共用；两个平台的不同之处全部列在下文「平台差异」。
 
@@ -51,7 +51,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 │   │   │   ├── force_aligner_gguf/   # ForcedAligner 适配器（推理内核共用 qwen_asr_gguf/inference）
 │   │   │   └── llama/                # llama.cpp 的 ctypes 绑定 llama.py + 两平台运行库 bin/（见 bin/README.md）
 │   │   ├── formatter/        # TextFormatter：中文数字 ITN、中英文空格
-│   │   ├── merger/           # 分段结果拼接（见 docs/text_merge_algorithm.md）
+│   │   ├── merger/           # 分段结果拼接（见 docs/分段拼接算法.md）
 │   │   └── ui/tray_manager.py# 托盘管理（菜单回调接到 app 的 stop / restart）
 │   ├── tools/                # chinese_itn、format_tools、token_sync、signal_handler、daemon_executor、
 │   │                         # asyncio_to_thread、empty_working_set（Windows 内存回收）、my_status（rich 状态动画）
@@ -176,7 +176,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 字段定义看 `protocol.py`（与 Client 仓库逐字相同）。不看代码不容易知道的几点：
 
 - 客户端发 `AudioMessage`（JSON 文本帧），`data` 是 base64 编码的 float32 16kHz 单声道 PCM。
-- `seg_duration` / `seg_overlap` 的协议默认值是 15 / 2，但客户端实际发 60 / 4；分段在服务端 `ws_recv` 里做（见 [text_merge_algorithm.md](docs/text_merge_algorithm.md)）。
+- `seg_duration` / `seg_overlap` 的协议默认值是 15 / 2，但客户端实际发 60 / 4；分段在服务端 `ws_recv` 里做（见 [分段拼接算法.md](docs/分段拼接算法.md)）。
 - `context` 作为 Qwen3 的 system prompt；`language` 是统一语言代码（见 `engines/language.py`），`auto` 表示不指定：模型先写出语言行再写正文，判断为没有人声时返回空（见 `inference/asr.py` 的 `_build_prompt_embd`）。
 - 服务端每完成一个片段就回一条 `RecognitionMessage`（`is_final=False`），最后一条 `is_final=True`；主输出是 `text`，文件转录用 `tokens` / `timestamps`。
 - `streaming=True`（客户端流式上屏）：忽略 `seg_*`，每句回一条，新增文字在 `delta` 里（见上文「流式任务」）。旧客户端不发这个字段，行为不变；新客户端连旧服务端时收不到 `delta`，按整段处理。
@@ -209,13 +209,13 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | 修改目标 | 涉及文件 |
 |---|---|
 | 默认端口、日志级别、数字/空格格式化开关 | `config_server.py` 的 `ServerConfig` |
-| 新增启动参数 / 环境变量 | `core/server/launch.py`（`parse_args` / `export_args` / `apply_overrides`），并更新本文档“启动参数与环境变量”；影响 Linux 部署的同步 `docs/LINUX.md` |
+| 新增启动参数 / 环境变量 | `core/server/launch.py`（`parse_args` / `export_args` / `apply_overrides`），并更新本文档“启动参数与环境变量”；影响 Linux 部署的同步 `docs/Linux部署.md` |
 | ONNX 后端、GPU 加速开关 | `config_server.py` 的 `*Args.onnx_provider` / `llm_use_gpu`；Provider 选择逻辑在 `engines/qwen_asr_gguf/inference/encoder.py` |
 | Qwen3 解码参数（温度、prompt 结构、上下文长度） | `engines/qwen_asr_gguf/asr_engine.py`（`decode_stream`）、`inference/asr.py`（`_build_prompt_embd` / `_decode`）、`config_server.py` 的 `n_ctx` / `chunk_size` |
 | 标点多少、服务端热词 | `inference/biasing.py`（规则与实测数据在文件头）、`config_server.py` 的 `comma_drop_margin` / `hotword_*`、`hot-server.txt`；KV Cache 回滚用 `engines/llama/llama.py` 的 `LlamaContext.truncate` |
 | 语言代码映射 | `engines/language.py` |
 | 识别流水线（文件任务对齐、最终格式化） | `worker/pipeline.py` |
-| 分段拼接算法 | `merger/text_merger.py`、`merger/token_merger.py`，同步更新 `docs/text_merge_algorithm.md` |
+| 分段拼接算法 | `merger/text_merger.py`、`merger/token_merger.py`，同步更新 `docs/分段拼接算法.md` |
 | ITN / 中英空格 | `core/tools/chinese_itn.py`、`core/tools/format_tools.py`、`formatter/text_formatter.py` |
 | 任务调度（多连接公平性、断连清理） | `worker/task_handler.py` |
 | 音频分段参数的服务端处理 | `connection/ws_recv.py` |
@@ -225,6 +225,6 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | 忙闲状态文件 | `core/server/runtime_status.py` 及调用点（`ws_recv.py`、`task_handler.py`） |
 | 换模型 / 换量化版本 | `config_server.py` 的 `ModelPaths` + `core/server/model_download.py` 的 `PACKAGES`（压缩包名、SHA-256、大小），同步更新 `models/README.md` |
 | 升级 llama.cpp | `engines/llama/bin/`（两平台同版本）+ 核对 `engines/llama/llama.py` 的 ctypes 结构体，见 `bin/README.md` |
-| Linux 启动环境（解释器查找、库路径、asmgt 契约） | `start_server.sh`、`setup_linux.sh`、`requirements-linux.txt`、`docs/LINUX.md` |
+| Linux 启动环境（解释器查找、库路径、asmgt 契约） | `start_server.sh`、`setup_linux.sh`、`requirements-linux.txt`、`docs/Linux部署.md` |
 | 托盘菜单项 | `core/ui/tray.py`（`_TraySystem.__init__` 菜单构建、`on_restart` / `on_exit`）、`core/server/ui/tray_manager.py`（回调接线） |
 | 退出 / 重启流程 | `core/server/app.py`（`stop` / `restart` / `_finish`）、`core/server/launch.py`（`current_command` / `spawn_new_instance`）、`worker/process_manager.py`（`stop`） |

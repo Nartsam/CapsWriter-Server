@@ -13,7 +13,7 @@
 #   - 忙闲探针：logs/server_status.json 的 queued + processing（文件型，因为本服务是 WebSocket 不是 HTTP）
 #
 # Python 解释器查找顺序：$CAPSWRITER_PYTHON → .conda-env/bin/python → .venv/bin/python
-# （环境由 setup_linux.sh 创建，详见 docs/LINUX.md）
+# （环境由 setup_linux.sh 创建，详见 docs/Linux部署.md）
 
 set -Eeuo pipefail
 

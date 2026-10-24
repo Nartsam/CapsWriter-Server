@@ -8,7 +8,7 @@
 - [ ] **Linux 热词同步**（2026-10-24）：确认运行服务的账户能够访问配置 Git 仓库，验证启动/正常退出同步、离线降级以及 Windows 客户端切换连接。共享代码按 Python 3.8/3.10 做静态检查，Linux 真机尚待验证。
 - [ ] **Linux 上的少加逗号、服务端热词与新提示词格式**（2026-10-03）：Windows 上用 249 段真实录音回归过；Linux 只做了静态检查。热词的试探解码要回滚 KV Cache，用到 `llama_memory_seq_rm` / `llama_memory_seq_pos_max`（`libllama.so` 里有这两个符号）。用 `./start_server.sh --port 6100` 跑三种冒烟测试和 `--streaming`，日志里不应有报错。
 - [ ] **Linux 上的流式任务**（2026-10-01）：Windows 上 `smoke_test.py --streaming` 与 42 段真实录音重放都已通过；Linux 只做了静态检查，用 `./start_server.sh --port 6100` 加 `--streaming` 冒烟测试确认。
-- [ ] **真实 Linux 服务器**（2026-09-28）：WSL（没有 Vulkan）里已验证 clone → `setup_linux.sh` → 下载模型 → 启动 → 三种冒烟测试 → 信号与进程退出。还没验证的：Vulkan GPU 解码、在 asmgt 里实际托管、`download_models.sh`（2026-09-29 新增，只做过静态检查）。按 [LINUX.md](LINUX.md)「从旧部署迁移」走一遍即可。
+- [ ] **真实 Linux 服务器**（2026-09-28）：WSL（没有 Vulkan）里已验证 clone → `setup_linux.sh` → 下载模型 → 启动 → 三种冒烟测试 → 信号与进程退出。还没验证的：Vulkan GPU 解码、在 asmgt 里实际托管、`download_models.sh`（2026-09-29 新增，只做过静态检查）。按 [Linux部署.md](Linux部署.md)「从旧部署迁移」走一遍即可。
 - [ ] **Linux 上识别子进程中途退出**（2026-10-01）：`kill -9 <识别子进程 PID>` 后，服务端应记录 `识别子进程意外退出` 并以退出码 1 退出，asmgt 随后重启。
 - [ ] **双击 exe 缺模型时回答 Y 直接下载**（2026-09-28）：询问逻辑只在 Linux 伪终端里测过回答 n；下载本身已用 `--download-models` 验证过。
 - [ ] **人工点托盘菜单**（2026-09-28）：“重启”“退出”只用程序向托盘窗口投递消息的方式点过。还没确认人工点“重启”后，新实例的控制台窗口会正常缩进托盘。
