@@ -16,6 +16,7 @@ from ..state import console
 from ..schema import Task
 from .pause_splitter import PauseSplitter
 from core.protocol import AudioMessage
+from core.hotword_sync import SYNC_PATH
 from core.constants import AudioFormat
 from core.tools.my_status import Status
 from .. import logger
@@ -192,6 +193,16 @@ async def ws_recv(websocket, app) -> None:
     处理单个客户端连接，接收音频数据并分发处理。
     """
     global status_mic
+
+    # 独立连接与音频共用端口，不能登记到识别会话或操作麦克风状态。
+    request = getattr(websocket, 'request', None)
+    path = getattr(request, 'path', getattr(websocket, 'path', ''))
+    if path == SYNC_PATH:
+        if app.hotword_sync is not None:
+            await app.hotword_sync.handle(websocket)
+        else:
+            await websocket.close(code=1011, reason='热词同步未启动')
+        return
 
     # 登记 socket 到连接池
     state = app.state

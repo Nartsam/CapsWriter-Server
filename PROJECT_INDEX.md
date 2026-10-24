@@ -65,6 +65,12 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 
 ---
 
+## 热词同步
+
+`core/hotword_sync.py` 与客户端逐字相同（兼容 Python 3.8），提供格式、三方合并和原子写入。`server/hotword_sync.py` 管理服务端持久状态、独立 WebSocket `/hotword-sync` 和客户端广播；`server/hotword_git.py` 只操作 `logs/hotword_sync/git/` 的配置仓库，在 `app.start()` / `_finish()` 同步。
+
+同步连接不登记到音频会话池。服务端保存后才 ACK，客户端按服务端身份保存共同基线；第一次切换服务器时使用可证明的共同 Git 提交，没有共同基线时合并双方内容。配置和用户操作集中在 [热词同步](docs/热词同步.md)。
+
 ## 运行时架构
 
 三个进程：

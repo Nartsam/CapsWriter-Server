@@ -38,7 +38,7 @@ start_server.exe / ./start_server.sh  [--host ADDR] [--port N] [--gpu N] [--down
 ### 少加逗号与服务端热词
 
 - **逗号太多**：调大 `config_server.py` 的 `comma_drop_margin`（默认 4，建议 0~6，0 关闭）。只会去掉模型本来就拿不准的逗号，不会把逗号换成句号。
-- **常用词总被识别成同音词**：把词写进 [`hot-server.txt`](hot-server.txt)，每行一个，保存后下一次识别即生效。它只是提高这个词的概率，不做替换；写法、加分和不适合的情况见文件开头的说明。
+- **常用词总被识别成同音词**：把词写进本机根目录的 `hot-server.txt`，每行一个，也可写成 `词 | 加分`。保存后下一次识别即生效，它只提高这个词的概率。文件由独立配置仓库同步，见 [热词同步](docs/热词同步.md)。
 - 改 `config_server.py` 后需要重启服务端（托盘菜单“重启”）；改 `hot-server.txt` 不需要。
 
 ## 验证服务是否正常
@@ -54,6 +54,7 @@ python tools/smoke_test.py --host 10.0.0.2 --port 6000 --source file
 |---|---|
 | [PROJECT_INDEX.md](PROJECT_INDEX.md) | 项目结构与架构（开发/AI Agent 入口） |
 | [docs/LINUX.md](docs/LINUX.md) | Linux 部署、asmgt、故障排查 |
+| [docs/热词同步.md](docs/热词同步.md) | 独立 Git 配置仓库、跨电脑同步与冲突处理 |
 | [docs/显卡加速.md](docs/显卡加速.md) | GPU 加速配置 |
 | [models/README.md](models/README.md) | 模型下载与目录结构 |
 | [docs/text_merge_algorithm.md](docs/text_merge_algorithm.md) | 长音频分段拼接算法 |

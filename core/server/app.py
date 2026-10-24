@@ -55,6 +55,7 @@ class CapsWriterServer:
 
         self.version = __version__
         self.is_alive = False
+        self.hotword_sync = None
 
 
     def _print_banner(self):
@@ -73,6 +74,9 @@ class CapsWriterServer:
         # 防连续触发
         if not self.is_alive: return
         self.is_alive = False 
+
+        if self.hotword_sync is not None:
+            self.hotword_sync.close()
 
         logger.info("=" * 50)
         logger.info("开始清理服务端资源...")
@@ -121,6 +125,9 @@ class CapsWriterServer:
 
     def _finish(self, exit_code: int):
         """start() 的唯一出口：如有重启请求，此时资源已全部释放，拉起新实例后退出"""
+        if self.hotword_sync is not None:
+            self.hotword_sync.close()
+            self.hotword_sync.sync_remote()
         if self._restart_requested:
             # stop() 在托盘线程里执行，它的第一步就会让主循环结束；
             # 必须等识别子进程真正退出（显存释放）后再拉起新实例
@@ -174,6 +181,20 @@ class CapsWriterServer:
             launch.pause_before_exit()
             sys.exit(1)
         check_model()
+
+        # 远端失败只降级到本地；先同步服务端热词，再加载识别模型。
+        try:
+            from config_server import HotwordSync, Qwen3ASRGGUFArgs
+            from .hotword_sync import HotwordSyncServer
+            self.hotword_sync = HotwordSyncServer(
+                self.base_dir, HotwordSync.repository,
+                self.base_dir / HotwordSync.token_file, Qwen3ASRGGUFArgs.hotword_bonus)
+            self.hotword_sync.sync_remote()
+        except Exception as error:
+            logger.warning('热词同步初始化失败，继续使用本机词库：%s', error)
+
+        if not self.is_alive:
+            self._finish(self._exit_code)
 
         # 托盘图标
         self.tray_manager.start()
