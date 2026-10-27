@@ -86,6 +86,9 @@ class QwenASREngine(BaseASREngine):
             streaming=False,
             detect_language=not mapped_lang,
         )
+        # 重试已耗尽时不能把熔断的半截文本当作成功终局交给客户端。
+        if res.is_aborted:
+            raise RuntimeError('语音解码重试后仍触发熔断')
 
         # 5. 更新结果
         stream.result.text = res.text

@@ -39,6 +39,8 @@ class ServerState:
 
     # WebSocket 连接池
     sockets: Dict[str, websockets.WebSocketServerProtocol] = field(default_factory=dict)
+    # 主进程专有：按连接管理录音、原始音频缓存和终局发布。
+    recognition_connections: Dict[str, object] = field(default_factory=dict)
     
     # 跨进程共享的 socket ID 列表（需要用 Manager().list() 初始化）
     sockets_id: Optional[ListProxy] = None
@@ -58,17 +60,20 @@ class WorkerState:
     识别子进程运行状态
     
     存储识别 Worker 进程运行时的状态：
-    - sessions: 活跃识别会话，以 task_id 为键
+    - sessions: 活跃识别会话，以 (socket_id, task_id, recognition_mode) 为键
     """
     # 识别会话集
-    sessions: Dict[str, RecognitionSession] = field(default_factory=dict)
+    sessions: Dict[tuple, RecognitionSession] = field(default_factory=dict)
 
-    def get_session(self, task_id: str, socket_id: str = '', source: str = '') -> RecognitionSession:
+    def get_session(self, task_id: str, socket_id: str = '', source: str = '',
+                    recognition_mode: str = 'full') -> RecognitionSession:
         """获取或创建识别会话"""
-        if task_id not in self.sessions:
-            result = Result(task_id=task_id, socket_id=socket_id, source=source)
-            self.sessions[task_id] = RecognitionSession(task_id=task_id, result=result)
-        return self.sessions[task_id]
+        key = socket_id, task_id, recognition_mode
+        if key not in self.sessions:
+            result = Result(task_id=task_id, socket_id=socket_id, source=source,
+                            recognition_mode=recognition_mode)
+            self.sessions[key] = RecognitionSession(task_id=task_id, result=result)
+        return self.sessions[key]
     
     def cleanup_sessions(self, sockets_id: ListProxy) -> int:
         """清理已断开连接的客户端 session"""

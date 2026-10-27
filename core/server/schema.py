@@ -45,6 +45,23 @@ class Task:
     samplerate: int = 16000
     streaming: bool = False
     silent: bool = False
+    revisable: bool = False
+
+    @property
+    def recognition_mode(self) -> str:
+        return 'stream' if self.streaming else 'full'
+
+    @property
+    def key(self) -> tuple:
+        return self.socket_id, self.task_id, self.recognition_mode
+
+
+@dataclass
+class DiscardTask:
+    """与音频共用输入队列；不计作识别片段，空 mode 表示丢弃两个阶段。"""
+    socket_id: str
+    task_id: str
+    recognition_mode: str = ''
 
 
 @dataclass
@@ -91,13 +108,17 @@ class Result:
     delta: str = ''
 
     is_final: bool = False
+    phase: str = 'partial'
+    recognition_mode: str = 'full'
+    status: str = 'ok'
+    error: str = ''
 
 @dataclass
 class RecognitionSession:
     """
     识别会话
     
-    封装单个 task_id 的所有中间识别状态。
+    封装单个连接、task_id 和识别阶段的中间状态。
     """
     task_id: str
     result: Result

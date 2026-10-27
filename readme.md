@@ -55,6 +55,7 @@ python tools/smoke_test.py --host 10.0.0.2 --port 6000 --source file
 | [PROJECT_INDEX.md](PROJECT_INDEX.md) | 项目结构与架构（开发/AI Agent 入口） |
 | [docs/Linux部署.md](docs/Linux部署.md) | Linux 部署、asmgt、故障排查 |
 | [docs/热词同步.md](docs/热词同步.md) | 独立 Git 配置仓库、跨电脑同步与冲突处理 |
+| [docs/角色请求整段识别.md](docs/角色请求整段识别.md) | 流式预览后选择普通最终识别的协议与验证 |
 | [docs/显卡加速.md](docs/显卡加速.md) | GPU 加速配置 |
 | [models/README.md](models/README.md) | 模型下载与目录结构 |
 | [docs/分段拼接算法.md](docs/分段拼接算法.md) | 长音频分段拼接算法 |

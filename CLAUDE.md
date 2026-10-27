@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-本仓库是 CapsWriter 离线语音输入的**服务端**（Windows + Linux）；配套客户端在 `../CapsWriter-Client`（另一个仓库，不在修改范围内）。
+本仓库是 CapsWriter 离线语音输入的**服务端**（Windows + Linux）；配套客户端是另一个仓库，不在修改范围内。
 
 ## 阅读顺序
 
@@ -12,7 +12,7 @@
 
 - **两个入口行为一致**：`start_server.exe`（Windows）与 `start_server.sh` → `start_server.py`（Linux）都只执行 `CapsWriterServer().start()`，启动逻辑一律放在 `core/` 的这条调用链里；`start_server.sh` 只做 Linux 环境准备。`start_server.exe` 无法重建，不要改；`start_server.py` 保持与 exe 内嵌脚本一致。平台相关的分支必须显式写，并加进 PROJECT_INDEX.md 的「平台差异」表。
 - **兼容 Python 3.10（Linux）与 3.13（Windows 的 `internal/`）**：不要用 3.11+ 才有的语法和标准库（`tomllib`、`except*`、`typing.Self` 等）。尽量只用标准库；确需新依赖时，Linux 加进 `requirements-linux.txt`，Windows 把 cp313-win_amd64 版本放进 `internal/`，两边都要实测。
-- **`core/protocol.py`、`core/constants.py` 与 Client 仓库逐字相同**，改协议必须两边同步（Client 仓库需要改时告知用户）。
+- **`core/protocol.py`、`core/constants.py` 是两端共享文件**，交付时需要逐字同步；未提供 Client 源码时交付本端协议和同步要求，不擅自寻找或修改对端仓库。
 - **仓库内容**：不要提交 `models/`、`logs/`、`__pycache__`/`.pyc`（`internal/` 除外）。`internal/` 按字节原样跟踪。Linux `.so` 别名是 git 符号链接，在 Windows 上是小文本文件，不要用普通文件覆盖。`.sh` 保持 LF 且带可执行位（`git add --chmod=+x`）；`.bat` 保持纯 ASCII + CRLF。
 - **本机上正运行着用户日常使用的服务端**（`start_server.exe`，端口 6000）。测试用其他端口（如 `--port 6100`），只结束自己启动的进程。同一时间只起一个测试实例：每个识别子进程约占 4GB 提交内存，三个实例同时运行曾使系统提交内存接近耗尽，其中一个子进程无声退出。
 - **不要在 WSL 里测试**（用户要求：曾占满 C 盘）。临时文件和测试副本也不要放 C 盘。
@@ -24,6 +24,7 @@
 1. `ast.parse` 全部改动的 `.py`（Linux 也会运行的代码加 `feature_version=(3, 10)`），改了 `.sh` 就 `bash -n`。不要用 `py_compile`（会生成 `__pycache__`）；系统 Python 没有项目依赖，不能直接 `import core`。
 2. Windows：`start_server.exe --port 6100` 启动，另开终端 `python tools/smoke_test.py --port 6100`；加 `--source file` 测对齐，加 `--seg-duration 6 --seg-overlap 2` 测拼接，加 `--streaming` 测流式任务（预期结果见 PROJECT_INDEX.md「冒烟测试」）。
 3. 在 Windows 开发机上改了 Linux 相关代码：做完第 1 步的静态检查，把需要真机确认的行为写进 docs/DEV_NOTES.md「待验证」，由用户在 Linux 服务器上用 `./start_server.sh --port 6100` 加冒烟测试验证。
+4. 改了识别阶段、缓存或取消行为：运行 `python -B tools/test_recognition.py`，再按 [角色请求整段识别](docs/角色请求整段识别.md) 运行真实协议探针。
 
 ## 文档维护
 

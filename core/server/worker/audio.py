@@ -25,17 +25,11 @@ def process_audio_task(task: Task, result: Result) -> Optional[np.ndarray]:
     # 1. 转换字节流为 float32 采样数组
     samples = np.frombuffer(task.data, dtype=np.float32)
 
+    # 用片段的实际终点计算总时长，重叠窗口和不足 0.1 秒的尾段均不重复或漏计。
+    result.duration = max(result.duration, task.offset + len(samples) / task.samplerate)
+
     # 空音频防御：少于 1600 采样点（约 0.1s @16kHz）直接跳过
     if len(samples) < 1600:
         return None
 
-    # 2. 计算此片段的时长贡献（秒）
-    # 公式：片段时长 - 重叠部分。如果是最终片段，重叠部分也计入总时长。
-    duration = len(samples) / task.samplerate
-    
-    # 更新累积时长
-    result.duration += duration - task.overlap
-    if task.is_final:
-        result.duration += task.overlap
-        
     return samples

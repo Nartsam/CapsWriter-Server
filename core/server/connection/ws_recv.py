@@ -15,7 +15,7 @@ import websockets
 from ..state import console
 from ..schema import Task
 from .pause_splitter import PauseSplitter
-from core.protocol import AudioMessage
+from core.protocol import AudioMessage, RecognitionControlMessage
 from core.hotword_sync import SYNC_PATH
 from core.constants import AudioFormat
 from core.tools.my_status import Status
@@ -74,6 +74,7 @@ def _make_task(msg: AudioMessage, socket_id: str, data: bytes, offset: float,
         language=msg.language,
         streaming=streaming,
         silent=silent,
+        revisable=msg.source == 'mic' and msg.streaming and msg.revisable,
     )
 
 
@@ -110,7 +111,16 @@ def _handle_streaming(msg: AudioMessage, cache: AudioCache, data: bytes, socket_
         cache.reset()
 
 
-async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) -> None:
+def ordinary_segment_size(msg: AudioMessage, byte_count: int):
+    """普通接收和完整音频重放共用切片边界；结束包的剩余音频直接作为尾段。"""
+    if AudioFormat.bytes_to_seconds(byte_count) >= msg.seg_duration + msg.seg_overlap * 2:
+        return (AudioFormat.seconds_to_bytes(msg.seg_duration + msg.seg_overlap),
+                AudioFormat.seconds_to_bytes(msg.seg_duration))
+    return None
+
+
+async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app,
+                          data: bytes = None) -> None:
     """
     处理客户端发送的音频消息
 
@@ -122,12 +132,10 @@ async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) 
     is_start = not bool(cache.chunks)
     socket_id = str(websocket.id)
 
-    # 从消息中获取分段参数
-    seg_threshold = msg.seg_duration + msg.seg_overlap * 2
-
     try:
         # base64 解码音频数据（float32, 16kHz, mono）
-        data = b64decode(msg.data)
+        if data is None:
+            data = b64decode(msg.data)
         cache.chunks += data
         cache.byte_count += len(data)
 
@@ -148,10 +156,8 @@ async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app) 
                 logger.info(f"开始接收音频文件，任务ID: {msg.task_id}")
 
             # 若缓冲已达到分段阈值，将片段作为任务提交
-            segment_bytes = AudioFormat.seconds_to_bytes(msg.seg_duration + msg.seg_overlap)
-            stride_bytes = AudioFormat.seconds_to_bytes(msg.seg_duration)
-
-            while cache.duration >= seg_threshold:
+            while sizes := ordinary_segment_size(msg, len(cache.chunks)):
+                segment_bytes, stride_bytes = sizes
                 segment_data = cache.chunks[:segment_bytes]
                 cache.chunks = cache.chunks[stride_bytes:]
 
@@ -215,8 +221,9 @@ async def ws_recv(websocket, app) -> None:
     console.print(f'[bold green]客户端已连接: {remote[0]}:{remote[1]}[/bold green]\n')
     logger.info(f"新客户端连接: {websocket}, ID: {socket_id}")
 
-    # 创建音频缓冲区
-    cache = AudioCache()
+    from .recognition import RecognitionConnection
+    connection = RecognitionConnection(websocket, app)
+    state.recognition_connections[socket_id] = connection
 
     # 接收并处理消息
     try:
@@ -224,9 +231,10 @@ async def ws_recv(websocket, app) -> None:
             # 使用协议类解析消息
             try:
                 data = json.loads(raw_message)
-                msg = AudioMessage.from_dict(data)
-                # 处理音频数据
-                await message_handler(websocket, msg, cache, app)
+                if data.get('type') == 'recognition_control':
+                    await connection.control(RecognitionControlMessage.from_dict(data))
+                else:
+                    await connection.audio(AudioMessage.from_dict(data))
             except Exception as e:
                 logger.error(f"消息解析失败: {str(e)}")
                 continue
@@ -249,6 +257,8 @@ async def ws_recv(websocket, app) -> None:
         sockets.pop(socket_id, None)
         if socket_id in sockets_id:
             sockets_id.remove(socket_id)
+        connection.close()
+        state.recognition_connections.pop(socket_id, None)
 
         console.print(f'[bold red]客户端已断开: {remote[0]}:{remote[1]}[/bold red]\n')
 

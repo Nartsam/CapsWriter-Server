@@ -4,17 +4,19 @@
 
 负责监听任务队列、执行识别流水线并将结果返回主进程。
 
-公平调度：从不同客户端（socket）轮转取任务处理，防止文件转录淹没队列。
-同 socket 内保持 FIFO 顺序，跨 socket 间轮转调度。
+最新会话优先，同一连接、录音和识别阶段内保持 FIFO 顺序。
 """
 
 from collections import OrderedDict, deque
+from dataclasses import replace
 import multiprocessing
 from multiprocessing import Queue
 from multiprocessing.managers import ListProxy
 import queue
+import time
 from .pipeline import TaskPipeline
 from ..state import WorkerState
+from ..schema import DiscardTask, Result
 from .. import runtime_status
 from . import logger
 
@@ -26,18 +28,16 @@ def _parent_alive() -> bool:
 
 
 class TaskBuffer:
-    """按 task_id 分组缓冲，支持跨 session 轮转出队。"""
+    """按连接、录音、阶段分组缓冲，最新缓冲优先。"""
     def __init__(self, state: WorkerState):
         self.state = state
-        self._buffers: OrderedDict[str, deque] = OrderedDict()
+        self._buffers: OrderedDict[tuple, deque] = OrderedDict()
 
     def enqueue(self, task):
-        """将任务放入对应 task_id 的缓冲尾部（同 session 内 FIFO）。
-        首次遇到新 task_id 时预创建 session。"""
-        tid = task.task_id
+        """将片段放入对应阶段的缓冲尾部（同 session 内 FIFO）。"""
+        tid = task.key
         if tid not in self._buffers:
             self._buffers[tid] = deque()
-            self.state.get_session(tid, task.socket_id, task.source)
         self._buffers[tid].append(task)
 
     def pop(self):
@@ -53,13 +53,16 @@ class TaskBuffer:
 
         return task
 
-    def cleanup_tasks(self) -> int:
+    def discard(self, key) -> int:
+        return len(self._buffers.pop(key, ()))
+
+    def cleanup_tasks(self, sockets_id) -> int:
         """清理已断开连接的 session 的缓冲任务，返回丢弃的任务数。"""
         removed = 0
         for tid in list(self._buffers):
-            if tid not in self.state.sessions:
+            if tid[0] not in sockets_id:
                 removed += len(self._buffers[tid])
-                logger.debug(f"清理断开连接的 session: {tid[:8]}")
+                logger.debug(f"清理断开连接的 session: {tid}")
                 del self._buffers[tid]
         return removed
 
@@ -73,7 +76,7 @@ class TaskHandler:
     任务处理器
 
     协调输入输出队列与识别引擎之间的任务流。
-    支持跨 socket 公平轮转调度。
+    保持最新会话优先和同阶段 FIFO。
     """
     def __init__(self, queue_in: Queue, queue_out: Queue, sockets_id: ListProxy, state: WorkerState):
         self.queue_in = queue_in
@@ -86,6 +89,7 @@ class TaskHandler:
         self.pipeline = None
 
         self.buffer = TaskBuffer(state)
+        self.discarded = set()
 
     def set_engine(self, recognizer, aligner=None):
         """注入识别引擎实例并初始化管线"""
@@ -108,6 +112,7 @@ class TaskHandler:
                         logger.warning("主进程已退出，识别子进程随之退出")
                         return False
                     self.cleanup_engines()
+                    self.cleanup()
                     continue
                 else:
                     return True
@@ -118,55 +123,75 @@ class TaskHandler:
             if task is None:
                 return False
 
-            # 跳过已断开连接客户端的任务
-            if task.socket_id not in self.sockets_id:
-                logger.debug(f"跳过断连客户端任务: {task.task_id[:8]}")
-                runtime_status.task_abandoned()
-                continue
-            
-            # 任务进入缓冲区
+            self.accept(task)
+
+    def discard(self, socket_id, task_id, mode=''):
+        for stage in (mode,) if mode else ('stream', 'full'):
+            key = socket_id, task_id, stage
+            self.discarded.add(key)
+            self.state.sessions.pop(key, None)
+            removed = self.buffer.discard(key)
+            if removed:
+                runtime_status.task_abandoned(removed)
+
+    def accept(self, task):
+        """按输入队列顺序应用控制，控制自身不参与片段计数。"""
+        if isinstance(task, DiscardTask):
+            self.discard(task.socket_id, task.task_id, task.recognition_mode)
+        elif task.socket_id not in self.sockets_id or task.key in self.discarded:
+            runtime_status.task_abandoned()
+        else:
             self.buffer.enqueue(task)
 
     def cleanup(self):
         """清理断连 socket 的缓冲任务和 session。"""
         self.state.cleanup_sessions(self.sockets_id)
-        removed = self.buffer.cleanup_tasks()
+        removed = self.buffer.cleanup_tasks(self.sockets_id)
         if removed:
             runtime_status.task_abandoned(removed)
+        self.discarded = {key for key in self.discarded if key[0] in self.sockets_id}
 
     def cleanup_engines(self):
         """时间戳引擎空闲时自动卸载。"""
         if self.pipeline and self.pipeline.aligner:
             self.pipeline.aligner.check_idle()
 
+    def process_next(self):
+        self.cleanup()
+        task = self.buffer.pop()
+        if task is None:
+            return
+        runtime_status.task_started()
+        try:
+            try:
+                result = self.pipeline.process(task)
+            except Exception as error:
+                logger.error('任务执行出错: %s', error, exc_info=True)
+                self.discard(task.socket_id, task.task_id, task.recognition_mode)
+                result = Result(
+                    task_id=task.task_id, socket_id=task.socket_id, source=task.source,
+                    duration=task.offset + len(task.data) / (task.samplerate * 4),
+                    time_start=task.time_start, time_submit=task.time_submit,
+                    time_complete=time.time(), is_final=True, phase='final',
+                    recognition_mode=task.recognition_mode, status='error', error=str(error))
+            # Queue 的后台线程稍后才序列化；普通和流式的所有结果都交不可再变的快照。
+            self.queue_out.put(replace(result, tokens=list(result.tokens),
+                                       timestamps=list(result.timestamps)))
+            if result.is_final:
+                self.state.sessions.pop(task.key, None)
+        finally:
+            runtime_status.task_finished()
+
     def loop(self):
-        """核心任务循环：drain 队列 → 清理断连 → 轮转执行一个。"""
-        logger.info("TaskHandler 开始工作循环 (公平调度)")
+        """核心任务循环：drain 队列 → 清理断连 → 执行最新会话的一片。"""
+        logger.info('TaskHandler 开始工作循环')
 
         while True:
             try:
                 if not self.drain_queue():
                     break
 
-                task = self.buffer.pop()
-                if task is None:
-                    continue
-
-                # 安全网：在 pipeline 处理前再次检查（任务可能在 drain→pop 之间成为孤儿）
-                # if task.socket_id not in self.sockets_id:
-                #     logger.debug(f"跳过断连客户端任务(安全网): {task.task_id[:8]}")
-                #     self.cleanup()
-                #     continue
-
-                runtime_status.task_started()
-                try:
-                    result = self.pipeline.process(task)
-                    self.queue_out.put(result)
-                    if result.is_final:
-                        self.state.sessions.pop(task.task_id, None)
-                    self.cleanup()
-                finally:
-                    runtime_status.task_finished()
+                self.process_next()
             except InterruptedError:
                 continue
             except Exception as e:

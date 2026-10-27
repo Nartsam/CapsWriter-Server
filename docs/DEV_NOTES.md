@@ -5,6 +5,7 @@
 
 ## 待验证
 
+- [ ] **Linux 角色请求整段识别**（2026-10-28）：在目标服务器运行 `tools/test_recognition.py` 和 [协议探针](角色请求整段识别.md#验证)，确认早晚决定、取消、队列计数和 TemporaryFile 生命周期。
 - [ ] **Linux 热词同步**（2026-10-24）：确认运行服务的账户能够访问配置 Git 仓库，验证启动/正常退出同步、离线降级以及 Windows 客户端切换连接。共享代码按 Python 3.8/3.10 做静态检查，Linux 真机尚待验证。
 - [ ] **Linux 上的少加逗号、服务端热词与新提示词格式**（2026-10-03）：Windows 上用 249 段真实录音回归过；Linux 只做了静态检查。热词的试探解码要回滚 KV Cache，用到 `llama_memory_seq_rm` / `llama_memory_seq_pos_max`（`libllama.so` 里有这两个符号）。用 `./start_server.sh --port 6100` 跑三种冒烟测试和 `--streaming`，日志里不应有报错。
 - [ ] **Linux 上的流式任务**（2026-10-01）：Windows 上 `smoke_test.py --streaming` 与 42 段真实录音重放都已通过；Linux 只做了静态检查，用 `./start_server.sh --port 6100` 加 `--streaming` 冒烟测试确认。

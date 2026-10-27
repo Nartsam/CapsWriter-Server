@@ -125,6 +125,10 @@ class CapsWriterServer:
 
     def _finish(self, exit_code: int):
         """start() 的唯一出口：如有重启请求，此时资源已全部释放，拉起新实例后退出"""
+        # 事件循环可能被 stop() 直接结束，连接的 finally 未必来得及运行。
+        for connection in list(self.state.recognition_connections.values()):
+            connection.close(notify_worker=False)
+        self.state.recognition_connections.clear()
         if self.hotword_sync is not None:
             self.hotword_sync.close()
             self.hotword_sync.sync_remote()

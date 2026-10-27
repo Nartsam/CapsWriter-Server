@@ -7,7 +7,7 @@
 
 CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) v2.5，MIT）。上游把客户端和服务端放在一起，这里拆成了两个仓库，本仓库**只做服务端**，仅供仓库主人自用：
 
-- **CapsWriter-Client**（`../CapsWriter-Client`）：按住快捷键录音 → 通过 WebSocket 把音频发给服务端 → 拿到文字后做热词替换、LLM 润色并模拟键盘上屏。
+- **CapsWriter-Client**（客户端仓库）：按住快捷键录音 → 通过 WebSocket 把音频发给服务端 → 拿到文字后做热词替换、LLM 润色并模拟键盘上屏。
 - **CapsWriter-Server**（本仓库）：WebSocket 服务，收音频、用 **Qwen3-ASR-1.7B** 识别、返回文字；文件转录任务额外用 **Qwen3-ForcedAligner** 生成字级时间戳。
 
 | 平台 | 入口 | Python 运行时 | 用途 |
@@ -35,7 +35,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 ├── core/
 │   ├── __init__.py           # colorama 初始化，导出 logger 工具
 │   ├── constants.py          # 音频格式常量（16kHz、float32、单声道）、标点集合 —— 与 Client 仓库逐字相同
-│   ├── protocol.py           # C/S 通信协议（AudioMessage / RecognitionMessage）—— 与 Client 仓库逐字相同
+│   ├── protocol.py           # C/S 通信协议（音频 / 控制 / 结果）—— 交付时与 Client 逐字同步
 │   ├── logger.py             # 日志：文件按 log_level 记录（logs/server_latest.log，超 10MB 截断），控制台只打 WARNING+
 │   ├── server/               # ======= 服务端 =======
 │   │   ├── app.py            # CapsWriterServer 门面类：start() / stop() / restart()
@@ -44,7 +44,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 │   │   ├── schema.py         # Task / Result / RecognitionSession
 │   │   ├── runtime_status.py # logs/server_status.json 忙闲状态（跨进程文件锁）
 │   │   ├── model_download.py # 模型清单与下载器（标准库实现）
-│   │   ├── connection/       # WebSocket：server_manager（起服务、端口检查）、ws_recv（收音频、分段）、ws_send（回结果）、pause_splitter（流式任务的停顿切句）
+│   │   ├── connection/       # WebSocket：server_manager（起服务）、ws_recv（分段）、ws_send（结果路由）、recognition（录音决策/缓存/终局）、pause_splitter（停顿切句）
 │   │   ├── worker/           # 识别子进程：process_manager、worker、model_loader、task_handler、pipeline、streaming（流式任务的前缀续写）、check_model、audio
 │   │   ├── engines/          # 引擎：base（抽象接口）、factory、manager（对齐器懒加载代理）、language（语言映射）
 │   │   │   ├── qwen_asr_gguf/        # Qwen3-ASR 适配器 asr_engine.py + 推理内核 inference/（源自上游 Qwen3-ASR-GGUF，已裁剪）
@@ -85,7 +85,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 
 ```
 Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ AudioCache 按 seg_duration/seg_overlap 切片（流式任务按停顿切句）
-   ─▶ queue_in ─▶ TaskHandler（按 task_id 缓冲，优先处理最新会话）─▶ TaskPipeline.process
+   ─▶ queue_in ─▶ TaskHandler（按连接/任务/识别阶段缓冲，优先处理最新会话）─▶ TaskPipeline.process
    ─▶ queue_out ─▶ ws_send ──RecognitionMessage(JSON)──▶ Client
 ```
 
@@ -118,6 +118,10 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 客户端按住录音键时逐句上屏用。不按 `seg_duration` 切，`ws_recv` 用 `PauseSplitter`（因果能量 VAD，50ms 帧）在停顿处切句，每句提交一个片段（片段间无重叠）；`TaskPipeline._process_stream` 用 `StreamState` 做前缀续写：把前几句的音频连同本句送进模型、前几句的识别文字作 assistant 前缀，模型只续写本句。每句末尾的标点暂留，由下一句开头的标点决定；每句单独格式化后放进 `Result.delta` 发出，发出的文字不再改，`text` 是各 `delta` 的拼接。松手前的静音尾巴（已切出过句子时）标为 `silent` 不识别。参数、实验数据与取舍写在 `connection/pause_splitter.py`、`worker/streaming.py` 的文件头。
 
 同一任务的片段在 `TaskBuffer` 里先进先出，前缀依赖上一句的结果，所以必须按序处理；改调度时要保持这一点。
+
+### 流式预览后普通最终识别
+
+`streaming=True, revisable=True` 的麦克风录音由主进程 `RecognitionConnection` 按连接和任务保存原始 PCM，允许客户端选择流式终局或重新普通识别。worker 的预览完成可转成 `decision`，并不结束外部录音任务。普通重识别使用独立 session，逐片重放共用切片逻辑；同一连接的决定和发布共用锁，终局只认领一次。协议、缓存生命周期和验证命令见 [角色请求整段识别](docs/角色请求整段识别.md)。
 
 ---
 
@@ -173,13 +177,13 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 
 ## 通信协议（`core/protocol.py`）
 
-字段定义看 `protocol.py`（与 Client 仓库逐字相同）。不看代码不容易知道的几点：
+字段定义看 `protocol.py`（两端升级时需逐字同步）。不看代码不容易知道的几点：
 
 - 客户端发 `AudioMessage`（JSON 文本帧），`data` 是 base64 编码的 float32 16kHz 单声道 PCM。
 - `seg_duration` / `seg_overlap` 的协议默认值是 15 / 2，但客户端实际发 60 / 4；分段在服务端 `ws_recv` 里做（见 [分段拼接算法.md](docs/分段拼接算法.md)）。
 - `context` 作为 Qwen3 的 system prompt；`language` 是统一语言代码（见 `engines/language.py`），`auto` 表示不指定：模型先写出语言行再写正文，判断为没有人声时返回空（见 `inference/asr.py` 的 `_build_prompt_embd`）。
-- 服务端每完成一个片段就回一条 `RecognitionMessage`（`is_final=False`），最后一条 `is_final=True`；主输出是 `text`，文件转录用 `tokens` / `timestamps`。
-- `streaming=True`（客户端流式上屏）：忽略 `seg_*`，每句回一条，新增文字在 `delta` 里（见上文「流式任务」）。旧客户端不发这个字段，行为不变；新客户端连旧服务端时收不到 `delta`，按整段处理。
+- 服务端每完成一个片段就回一条 `RecognitionMessage`，显式标注 `phase` 和 `recognition_mode`；`is_final=True` 只用于唯一终局。可重识别预览结束时发送 `phase=decision, is_final=False`。主输出是 `text`，文件转录用 `tokens` / `timestamps`。
+- `streaming=True` 的流式阶段忽略 `seg_*`，每句新增文字在 `delta` 中；`revisable` 任务选择 full 后使用原 `seg_*` 重识别。两端同时升级，无旧服务端能力协商。
 - WebSocket 子协议 `binary`，`max_size=None`。结果只发回提交任务的那个连接；连接断开后，其未处理的任务会被子进程丢弃。
 
 ---
@@ -219,6 +223,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 | ITN / 中英空格 | `core/tools/chinese_itn.py`、`core/tools/format_tools.py`、`formatter/text_formatter.py` |
 | 任务调度（多连接公平性、断连清理） | `worker/task_handler.py` |
 | 音频分段参数的服务端处理 | `connection/ws_recv.py` |
+| 流式预览后的 full / commit / cancel、唯一终局与缓存 | `connection/recognition.py`、`worker/task_handler.py`，验证见 [角色请求整段识别](docs/角色请求整段识别.md) |
 | 流式任务的切句（停顿阈值、句长限制） | `connection/pause_splitter.py`；接入点在 `ws_recv._handle_streaming` |
 | 流式任务的前缀续写（窗口、前缀、暂留标点、逐段格式化） | `worker/streaming.py`、`worker/pipeline.py` 的 `_process_stream`；改完用 `smoke_test.py --streaming` 验证 |
 | 通信协议 | `core/protocol.py` + 两端收发代码（**Client 仓库同步修改**） |

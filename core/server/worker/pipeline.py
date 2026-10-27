@@ -9,7 +9,6 @@
 
 import re
 import time
-from dataclasses import replace
 
 import numpy as np
 
@@ -67,9 +66,10 @@ class TaskPipeline:
             return self._process_stream(task)
         try:
             logger.info(f"任务 {task.task_id[:8]}, 语言={task.language}, 来源={task.source}")
-            is_first_segment = task.task_id not in self.state.sessions
-            session = self.state.get_session(task.task_id, task.socket_id, task.source)
+            is_first_segment = task.key not in self.state.sessions
+            session = self.state.get_session(task.task_id, task.socket_id, task.source, task.recognition_mode)
             result = session.result
+            result.phase = 'final' if task.is_final else 'partial'
             
             # 2. 预处理音频并获取采样点
             samples = process_audio_task(task, result)
@@ -79,6 +79,8 @@ class TaskPipeline:
                 result.time_start, result.time_submit = task.time_start, task.time_submit
                 result.time_complete = time.time()
                 result.is_final = task.is_final
+                if task.is_final:
+                    return self._finalize(task, result)
                 return result
 
             # 3. 执行识别推理
@@ -132,33 +134,29 @@ class TaskPipeline:
             if not task.is_final:
                 return result
 
-            # 任务结束清理与最终格式化
-            raw_text = result.text
-            result.text = self.formatter.format(result.text)
-            result.text_accu = self.formatter.format(result.text_accu)
-            console.print(f'  片段拼接：[purple]{raw_text}', soft_wrap=True)
-            console.print(f'  格式化后：[green]{result.text}\n', soft_wrap=True)
-
-            logger.debug(f'格式调整：{raw_text} --> {result.text}')
-
-            # 将格式化引入的标点同步回 token 序列
-            if result.tokens and result.text_accu:
-                result.tokens, result.timestamps = sync_tokens_from_text(
-                    result.tokens, result.timestamps, result.text_accu
-                )
-            
-            # 如果依然没有 tokens (麦克风跳过了对齐)，则用 text 回退
-            if not result.tokens and result.text:
-                self._fill_uniform_tokens(result)
-            
-            result.is_final = True
-            self._log_finished(task, result)
-
-            return result
+            return self._finalize(task, result)
 
         except Exception as e:
             logger.error(f"推理管线错误: {e}", exc_info=True)
             raise
+
+    def _finalize(self, task: Task, result: Result) -> Result:
+        # 极短/空尾段也必须完成格式化，不能跳过此前片段的最终收尾。
+        raw_text = result.text
+        result.text = self.formatter.format(result.text)
+        result.text_accu = self.formatter.format(result.text_accu)
+        console.print(f'  片段拼接：[purple]{raw_text}', soft_wrap=True)
+        console.print(f'  格式化后：[green]{result.text}\n', soft_wrap=True)
+        logger.debug(f'格式调整：{raw_text} --> {result.text}')
+        if result.tokens and result.text_accu:
+            result.tokens, result.timestamps = sync_tokens_from_text(
+                result.tokens, result.timestamps, result.text_accu)
+        if not result.tokens and result.text:
+            self._fill_uniform_tokens(result)
+        result.is_final = True
+        if not task.revisable:
+            self._log_finished(task, result)
+        return result
 
     @staticmethod
     def _fill_uniform_tokens(result: Result) -> None:
@@ -182,8 +180,9 @@ class TaskPipeline:
         原理与取舍见 worker/streaming.py。每句单独格式化后发出，result.text 是已发出各段的拼接。
         """
         try:
-            session = self.state.get_session(task.task_id, task.socket_id, task.source)
+            session = self.state.get_session(task.task_id, task.socket_id, task.source, task.recognition_mode)
             result = session.result
+            result.phase = 'final' if task.is_final else 'partial'
             if session.stream is None:
                 session.stream = StreamState()
             stream_state = session.stream
@@ -213,14 +212,15 @@ class TaskPipeline:
             result.time_complete = time.time()
 
             if not task.is_final:
-                # 结果对象会被下一句继续修改，而 queue_out 在后台线程里才序列化，交出去的必须是副本
-                return replace(result)
+                return result
 
             if result.text:
                 self._fill_uniform_tokens(result)
             result.is_final = True
-            console.print(f'  流式结果：[green]{result.text}\n', soft_wrap=True)
-            self._log_finished(task, result)
+            # 可重识别录音在主进程做最终决定，此处的预览完成不能记作任务完成。
+            if not task.revisable:
+                console.print(f'  流式结果：[green]{result.text}\n', soft_wrap=True)
+                self._log_finished(task, result)
             return result
 
         except Exception as e:
