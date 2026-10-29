@@ -49,7 +49,7 @@ class HotwordGit:
             kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
         else:
             kwargs['start_new_session'] = True
-        command = ['git', '-C', str(self.directory)] + list(args)
+        command = ['git'] + list(args)
         process = subprocess.Popen(command, **kwargs)
         try:
             stdout, stderr = process.communicate(timeout=30 if network else 10)

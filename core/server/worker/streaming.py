@@ -21,13 +21,15 @@ from typing import List, Tuple
 
 import numpy as np
 
+from core.constants import AudioFormat
+
 # 暂留与前缀处理时视为「末尾标点」的字符（含空格）
 HOLD_PUNCT = '，。！？；：、,.!?;: '
 
 # inference/asr.py 熔断重试后附在结果末尾的提示，不能进前缀
 _ABORT_MARK = '====解码有误，强制熔断===='
 
-SAMPLE_RATE = 16000
+SAMPLE_RATE = AudioFormat.SAMPLE_RATE
 
 
 class StreamState:

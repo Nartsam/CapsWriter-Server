@@ -7,7 +7,6 @@ WebSocket 接收处理模块
 
 import json
 import time
-from base64 import b64decode
 
 import numpy as np
 import websockets
@@ -57,7 +56,7 @@ class AudioCache:
         self.splitter = None
 
 
-def _make_task(msg: AudioMessage, socket_id: str, data: bytes, offset: float,
+def make_task(msg: AudioMessage, socket_id: str, data: bytes, offset: float,
                is_final: bool, streaming: bool = False, silent: bool = False) -> Task:
     """按消息里的任务参数构造一个识别片段"""
     return Task(
@@ -93,7 +92,7 @@ def _handle_streaming(msg: AudioMessage, cache: AudioCache, data: bytes, socket_
             n_bytes = n_samples * AudioFormat.BYTES_PER_SAMPLE
             segment, cache.chunks = cache.chunks[:n_bytes], cache.chunks[n_bytes:]
             runtime_status.task_queued()
-            queue_in.put(_make_task(msg, socket_id, segment, cache.offset, False,
+            queue_in.put(make_task(msg, socket_id, segment, cache.offset, False,
                                     streaming=True, silent=not has_speech))
             logger.debug(f"流式切句，任务ID: {msg.task_id}, 偏移: {cache.offset:.2f}s, "
                          f"句长: {n_samples / AudioFormat.SAMPLE_RATE:.2f}s, 有语音: {has_speech}")
@@ -104,7 +103,7 @@ def _handle_streaming(msg: AudioMessage, cache: AudioCache, data: bytes, socket_
         # 整次录音只有一句时 VAD 的噪声底估计还不可靠，宁可照常识别，也不能把短句误判成静音丢掉
         silent = splitter.cuts > 0 and not splitter.tail_has_speech
         runtime_status.task_queued()
-        queue_in.put(_make_task(msg, socket_id, cache.chunks, cache.offset, True,
+        queue_in.put(make_task(msg, socket_id, cache.chunks, cache.offset, True,
                                 streaming=True, silent=silent))
         logger.debug(f"提交流式最终片段，任务ID: {msg.task_id}, 共 {splitter.cuts + 1} 句, "
                      f"末句 {AudioFormat.bytes_to_seconds(len(cache.chunks)):.2f}s, 静音: {silent}")
@@ -120,76 +119,67 @@ def ordinary_segment_size(msg: AudioMessage, byte_count: int):
 
 
 async def message_handler(websocket, msg: AudioMessage, cache: AudioCache, app,
-                          data: bytes = None) -> None:
+                          data: bytes) -> None:
     """
-    处理客户端发送的音频消息
+    处理一个已解码的音频数据包（由 RecognitionConnection 调用）
 
     根据消息中的分段参数，将音频数据分段后提交到识别队列；流式任务改为在停顿处切句。
     """
     queue_in = app.state.queue_in
 
-    global status_mic
-    is_start = not bool(cache.chunks)
+    is_start = not cache.chunks
     socket_id = str(websocket.id)
 
-    try:
-        # base64 解码音频数据（float32, 16kHz, mono）
-        if data is None:
-            data = b64decode(msg.data)
-        cache.chunks += data
-        cache.byte_count += len(data)
+    cache.chunks += data
+    cache.byte_count += len(data)
 
-        if msg.streaming and msg.source == 'mic':
-            if msg.is_final:
-                status_mic.stop()
-            else:
-                status_mic.start()
-            _handle_streaming(msg, cache, data, socket_id, queue_in)
-            return
+    if msg.streaming and msg.source == 'mic':
+        if msg.is_final:
+            status_mic.stop()
+        else:
+            status_mic.start()
+        _handle_streaming(msg, cache, data, socket_id, queue_in)
+        return
 
-        if not msg.is_final:
-            # 打印状态消息
-            if msg.source == 'mic':
-                status_mic.start()
-            if msg.source == 'file' and is_start:
-                console.print('正在接收音频文件...')
-                logger.info(f"开始接收音频文件，任务ID: {msg.task_id}")
+    if not msg.is_final:
+        # 打印状态消息
+        if msg.source == 'mic':
+            status_mic.start()
+        if msg.source == 'file' and is_start:
+            console.print('正在接收音频文件...')
+            logger.info(f"开始接收音频文件，任务ID: {msg.task_id}")
 
-            # 若缓冲已达到分段阈值，将片段作为任务提交
-            while sizes := ordinary_segment_size(msg, len(cache.chunks)):
-                segment_bytes, stride_bytes = sizes
-                segment_data = cache.chunks[:segment_bytes]
-                cache.chunks = cache.chunks[stride_bytes:]
+        # 若缓冲已达到分段阈值，将片段作为任务提交
+        while sizes := ordinary_segment_size(msg, len(cache.chunks)):
+            segment_bytes, stride_bytes = sizes
+            segment_data = cache.chunks[:segment_bytes]
+            cache.chunks = cache.chunks[stride_bytes:]
 
-                task = _make_task(msg, socket_id, segment_data, cache.offset, False)
-                cache.offset += msg.seg_duration
-                runtime_status.task_queued()
-                queue_in.put(task)
-                logger.debug(
-                    f"提交音频片段，任务ID: {msg.task_id}, "
-                    f"偏移: {cache.offset}s, 缓冲区: {len(cache.chunks)} bytes"
-                )
-
-        else:  # is_final
-            # 打印状态消息
-            if msg.source == 'mic':
-                status_mic.stop()
-            elif msg.source == 'file':
-                print(f'音频文件接收完毕，时长 {cache.total_duration:.2f}s')
-                logger.info(f"音频文件接收完毕，任务ID: {msg.task_id}, 时长: {cache.total_duration:.2f}s")
-
-            # 提交最终片段
-            task = _make_task(msg, socket_id, cache.chunks, cache.offset, True)
+            task = make_task(msg, socket_id, segment_data, cache.offset, False)
+            cache.offset += msg.seg_duration
             runtime_status.task_queued()
             queue_in.put(task)
-            logger.debug(f"提交最终片段，任务ID: {msg.task_id}, 数据大小: {len(cache.chunks)} bytes")
+            logger.debug(
+                f"提交音频片段，任务ID: {msg.task_id}, "
+                f"偏移: {cache.offset}s, 缓冲区: {len(cache.chunks)} bytes"
+            )
 
-            # 重置缓冲区
-            cache.reset()
+    else:  # is_final
+        # 打印状态消息
+        if msg.source == 'mic':
+            status_mic.stop()
+        elif msg.source == 'file':
+            print(f'音频文件接收完毕，时长 {cache.total_duration:.2f}s')
+            logger.info(f"音频文件接收完毕，任务ID: {msg.task_id}, 时长: {cache.total_duration:.2f}s")
 
-    except Exception as e:
-        logger.error(f"音频数据处理错误，任务ID: {msg.task_id}: {e}", exc_info=True)
-        raise
+        # 提交最终片段
+        task = make_task(msg, socket_id, cache.chunks, cache.offset, True)
+        runtime_status.task_queued()
+        queue_in.put(task)
+        logger.debug(f"提交最终片段，任务ID: {msg.task_id}, 数据大小: {len(cache.chunks)} bytes")
+
+        # 重置缓冲区
+        cache.reset()
 
 
 async def ws_recv(websocket, app) -> None:
@@ -198,12 +188,8 @@ async def ws_recv(websocket, app) -> None:
 
     处理单个客户端连接，接收音频数据并分发处理。
     """
-    global status_mic
-
     # 独立连接与音频共用端口，不能登记到识别会话或操作麦克风状态。
-    request = getattr(websocket, 'request', None)
-    path = getattr(request, 'path', getattr(websocket, 'path', ''))
-    if path == SYNC_PATH:
+    if websocket.request.path == SYNC_PATH:
         if app.hotword_sync is not None:
             await app.hotword_sync.handle(websocket)
         else:

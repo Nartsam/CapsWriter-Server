@@ -10,11 +10,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
+from config_server import Qwen3ASRGGUFArgs
 from core.constants import AudioFormat
 from core.protocol import AudioMessage, RecognitionMessage, RecognitionControlMessage
 from ..schema import DiscardTask, Result
+from ..state import console
 from .. import logger, runtime_status
-from .ws_recv import AudioCache, _make_task, message_handler, ordinary_segment_size, status_mic
+from .ws_recv import AudioCache, make_task, message_handler, ordinary_segment_size, status_mic
 
 
 @dataclass
@@ -39,9 +41,8 @@ class Recording:
 
     @property
     def mode(self):
-        if self.decision == 'full':
-            return 'full'
-        return 'stream' if self.message.source == 'mic' and self.message.streaming else 'full'
+        streaming = self.message.source == 'mic' and self.message.streaming
+        return 'stream' if streaming and self.decision != 'full' else 'full'
 
     @property
     def duration(self):
@@ -104,8 +105,7 @@ class RecognitionConnection:
                         directory = Path(self.app.base_dir) / 'logs' / 'role_full_asr'
                         directory.mkdir(parents=True, exist_ok=True)
                         record.spool = tempfile.TemporaryFile(dir=directory, mode='w+b')
-                    if record.spool.write(data) != len(data):
-                        raise OSError('原始音频缓存写入不完整')
+                    record.spool.write(data)
 
                 if record.decision == 'full':
                     if msg.is_final:
@@ -173,14 +173,13 @@ class RecognitionConnection:
         is_final = sizes is None
         size, stride = sizes if sizes else (record.byte_count - position, 0)
         # 适配器会静默截断超长片段；完整识别必须明确失败，不能返回缺失尾部的全文。
-        from config_server import Qwen3ASRGGUFArgs
         if AudioFormat.bytes_to_seconds(size) > Qwen3ASRGGUFArgs.chunk_size:
             raise ValueError('普通识别片段超过模型 chunk_size，请缩短 seg_duration / seg_overlap 或音频结束包')
         record.spool.seek(position)
         data = record.spool.read(size)
         if len(data) != size:
             raise OSError('原始音频缓存读取不完整')
-        task = _make_task(msg, self.socket_id, data, record.replay_offset, is_final)
+        task = make_task(msg, self.socket_id, data, record.replay_offset, is_final)
         task.time_submit = record.full_submit
         record.replay_position += stride
         record.replay_offset += msg.seg_duration
@@ -269,7 +268,6 @@ class RecognitionConnection:
             logger.info('录音终结，任务ID: %s，模式: %s，状态: %s，时长: %.2fs，文本: %s',
                         task_id, msg.recognition_mode, msg.status, msg.duration, msg.text)
         if result.source == 'file':
-            from ..state import console
             console.print(f'    转录进度：{result.duration:.2f}s', end='\r')
             if result.is_final:
                 console.print('\n    [green]转录完成' if result.status == 'ok' else '\n    [red]转录失败')

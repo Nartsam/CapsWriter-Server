@@ -21,10 +21,10 @@
 
 改完代码至少：
 
-1. `ast.parse` 全部改动的 `.py`（Linux 也会运行的代码加 `feature_version=(3, 10)`），改了 `.sh` 就 `bash -n`。不要用 `py_compile`（会生成 `__pycache__`）；系统 Python 没有项目依赖，不能直接 `import core`。
+1. `python tools/run_tests.py`：Python 语法（全部按 3.10，与客户端共用的四个文件按 3.8）、`bash -n`、未定义名字、离线单测一把梭。只需要 numpy，不联网、不加载模型。不要用 `py_compile`（会生成 `__pycache__`）；系统 Python 没有项目依赖，不能直接 `import core`。
 2. Windows：`start_server.exe --port 6100` 启动，另开终端 `python tools/smoke_test.py --port 6100`；加 `--source file` 测对齐，加 `--seg-duration 6 --seg-overlap 2` 测拼接，加 `--streaming` 测流式任务（预期结果见 PROJECT_INDEX.md「冒烟测试」）。
 3. 在 Windows 开发机上改了 Linux 相关代码：做完第 1 步的静态检查，把需要真机确认的行为写进 docs/DEV_NOTES.md「待验证」，由用户在 Linux 服务器上用 `./start_server.sh --port 6100` 加冒烟测试验证。
-4. 改了识别阶段、缓存或取消行为：运行 `python -B tools/test_recognition.py`，再按 [角色请求整段识别](docs/角色请求整段识别.md) 运行真实协议探针。
+4. 改了识别阶段、缓存或取消行为：第 1 步已包含 `tools/test_recognition.py`，再按 [角色请求整段识别](docs/角色请求整段识别.md) 运行真实协议探针。
 
 ## 文档维护
 

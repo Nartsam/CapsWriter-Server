@@ -54,10 +54,13 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 │   │   ├── merger/           # 分段结果拼接（见 docs/分段拼接算法.md）
 │   │   └── ui/tray_manager.py# 托盘管理（菜单回调接到 app 的 stop / restart）
 │   ├── tools/                # chinese_itn、format_tools、token_sync、signal_handler、daemon_executor、
-│   │                         # asyncio_to_thread、empty_working_set（Windows 内存回收）、my_status（rich 状态动画）
+│   │                         # empty_working_set（Windows 内存回收）、my_status（rich 状态动画）
 │   └── ui/tray.py            # 系统托盘：显示/隐藏、重启、退出
 ├── models/                   # 模型（不进 git，见 models/README.md）
-├── tools/smoke_test.py       # 冒烟测试客户端（仅标准库）+ assets/demo.wav
+├── tools/                    # run_tests.py（语法/未定义名字/离线单测一把梭）、check_undefined.py +
+│                             # undefined_baseline.txt、smoke_test.py（仅标准库）+ assets/demo.wav、
+│                             # smoke_test_revisable.py、test_recognition.py、test_hotword_sync.py、
+│                             # test_hotword_transport.py（需 --client-root）
 ├── assets/icon.ico           # 托盘图标
 ├── docs/                     # 专题文档与开发笔记（清单见 CLAUDE.md 的阅读顺序）
 └── logs/                     # 运行时生成：server_latest.log、server_status.json（不进 git）
@@ -69,7 +72,7 @@ CapsWriter 是离线语音输入工具（上游：[HaujetZhao/CapsWriter-Offline
 
 `core/hotword_sync.py` 与客户端逐字相同（兼容 Python 3.8），提供格式、三方合并和原子写入。`server/hotword_sync.py` 管理服务端持久状态、独立 WebSocket `/hotword-sync` 和客户端广播；`server/hotword_git.py` 只操作 `logs/hotword_sync/git/` 的配置仓库，在 `app.start()` / `_finish()` 同步。
 
-同步连接不登记到音频会话池。服务端保存后才 ACK，客户端按服务端身份保存共同基线；第一次切换服务器时使用可证明的共同 Git 提交，没有共同基线时合并双方内容。配置和用户操作集中在 [热词同步](docs/热词同步.md)。
+同步连接不登记到音频会话池。服务端保存后才 ACK，客户端按服务端身份保存共同基线；第一次切换服务器时取两端远端提交的共同祖先作基线，没有共同祖先时合并双方内容。配置和用户操作集中在 [热词同步](docs/热词同步.md)。
 
 ## 运行时架构
 
@@ -121,7 +124,7 @@ Client ──AudioMessage(JSON, base64 float32 16k)──▶ ws_recv ─▶ Audi
 
 ### 流式预览后普通最终识别
 
-`streaming=True, revisable=True` 的麦克风录音由主进程 `RecognitionConnection` 按连接和任务保存原始 PCM，允许客户端选择流式终局或重新普通识别。worker 的预览完成可转成 `decision`，并不结束外部录音任务。普通重识别使用独立 session，逐片重放共用切片逻辑；同一连接的决定和发布共用锁，终局只认领一次。协议、缓存生命周期和验证命令见 [角色请求整段识别](docs/角色请求整段识别.md)。
+`streaming=True, revisable=True` 的麦克风录音由主进程 `RecognitionConnection` 按连接和任务保存原始 PCM，客户端可以采用流式结果，也可以要求从完整录音重做一次普通识别。流式预览识别完最后一句后发 `phase=decision` 等客户端决定，录音任务此时还没结束。普通重识别用独立 session，逐片重放时共用普通切片逻辑；同一连接的决定与结果发布共用一把锁，终局只认领一次。协议、缓存生命周期和验证命令见 [角色请求整段识别](docs/角色请求整段识别.md)。
 
 ---
 

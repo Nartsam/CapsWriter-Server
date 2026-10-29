@@ -214,6 +214,8 @@ class CapsWriterServer:
         try:
             self.loop.run_until_complete(self.socket_manager.start())
         except RuntimeError:
+            # stop() 用 loop.stop() 结束事件循环，run_until_complete 必然抛
+            # “Event loop stopped before Future completed”，这就是正常的退出路径
             pass
 
         self._finish(self._exit_code)

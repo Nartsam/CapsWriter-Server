@@ -8,7 +8,11 @@
 
 import numpy as np
 from typing import Optional
+from core.constants import AudioFormat
 from core.server.schema import Task, Result
+
+# 短于这个长度的片段不送进模型（模型会把纯静音识别成「嗯。」之类的幻觉）
+MIN_SAMPLES = int(AudioFormat.SAMPLE_RATE * 0.1)
 
 
 def process_audio_task(task: Task, result: Result) -> Optional[np.ndarray]:
@@ -28,8 +32,8 @@ def process_audio_task(task: Task, result: Result) -> Optional[np.ndarray]:
     # 用片段的实际终点计算总时长，重叠窗口和不足 0.1 秒的尾段均不重复或漏计。
     result.duration = max(result.duration, task.offset + len(samples) / task.samplerate)
 
-    # 空音频防御：少于 1600 采样点（约 0.1s @16kHz）直接跳过
-    if len(samples) < 1600:
+    # 空音频或极短片段直接跳过
+    if len(samples) < MIN_SAMPLES:
         return None
 
     return samples

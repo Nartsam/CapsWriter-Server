@@ -18,6 +18,7 @@ from core.server.schema import Result, RecognitionSession
 
 if TYPE_CHECKING:
     from .app import CapsWriterServer
+    from .connection.recognition import RecognitionConnection
 
 # Rich console 用于控制台输出（服务端统一使用此实例）
 console = Console(highlight=False)
@@ -38,9 +39,9 @@ class ServerState:
     app: Optional[CapsWriterServer] = None
 
     # WebSocket 连接池
-    sockets: Dict[str, websockets.WebSocketServerProtocol] = field(default_factory=dict)
+    sockets: Dict[str, websockets.ServerConnection] = field(default_factory=dict)
     # 主进程专有：按连接管理录音、原始音频缓存和终局发布。
-    recognition_connections: Dict[str, object] = field(default_factory=dict)
+    recognition_connections: Dict[str, RecognitionConnection] = field(default_factory=dict)
     
     # 跨进程共享的 socket ID 列表（需要用 Manager().list() 初始化）
     sockets_id: Optional[ListProxy] = None
@@ -77,12 +78,10 @@ class WorkerState:
     
     def cleanup_sessions(self, sockets_id: ListProxy) -> int:
         """清理已断开连接的客户端 session"""
-        stale_ids = [
-            sid for sid, session in list(self.sessions.items())
-            if session.result.socket_id not in sockets_id
-        ]
-        for sid in stale_ids:
-            self.sessions.pop(sid, None)
+        stale_ids = [key for key, session in self.sessions.items()
+                     if session.result.socket_id not in sockets_id]
+        for key in stale_ids:
+            del self.sessions[key]
         if stale_ids:
             from . import logger
             logger.debug(f"清理了 {len(stale_ids)} 个已断开连接的 session")

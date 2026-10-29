@@ -1,4 +1,4 @@
-from core.tools.asyncio_to_thread import to_thread
+from asyncio import to_thread
 from .. import logger
 
 

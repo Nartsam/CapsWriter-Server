@@ -496,12 +496,6 @@ class LlamaModel:
         """(Native) 单个 Token 转字符串 Piece"""
         return self.token_to_bytes(token_id).decode('utf-8', errors='replace')
 
-    def token_bos(self) -> int:
-        return llama_vocab_bos(self.vocab)
-
-    def token_eos(self) -> int:
-        return llama_vocab_eos(self.vocab)
-        
     def token_to_id(self, text: str) -> int:
         """(Native) 单个 Token 字符串转 ID (仅限 Exact Match)"""
         # 利用 tokenize 来查找 ID

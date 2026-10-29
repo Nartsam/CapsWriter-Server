@@ -17,7 +17,7 @@ from core.server.schema import Task, Result
 from core.server.formatter import TextFormatter
 from core.tools.token_sync import sync_tokens_from_text
 from core.server.engines.base import EngineCapabilities
-from .audio import process_audio_task
+from .audio import MIN_SAMPLES, process_audio_task
 from .streaming import StreamState
 from . import logger
 
@@ -46,17 +46,13 @@ class TaskPipeline:
 
     def _process_simple_merge(self, result: Result, stream_result_text: str) -> None:
         """ 处理简单文本拼接（主要输出，用于语音输入） """
-        try:
-            segment_text = stream_result_text.replace('@@', '').strip()
-            segment_text = re.sub(r'\s+', ' ', segment_text)
-            
-            prev_len = len(result.text)
-            result.text = merge_by_text(result.text, segment_text)
-            added_chars = len(result.text) - prev_len
-            
-            logger.debug(f"简单拼接: +{added_chars} 字符, 片段={len(segment_text)}, 总={len(result.text)}")
-        except Exception as e:
-            logger.warning(f"简单文本拼接失败: {e}")
+        segment_text = re.sub(r'\s+', ' ', stream_result_text.replace('@@', '').strip())
+
+        prev_len = len(result.text)
+        result.text = merge_by_text(result.text, segment_text)
+
+        logger.debug(f"简单拼接: +{len(result.text) - prev_len} 字符, "
+                     f"片段={len(segment_text)}, 总={len(result.text)}")
 
     def process(self, task: Task) -> Result:
         """
@@ -64,81 +60,74 @@ class TaskPipeline:
         """
         if task.streaming:
             return self._process_stream(task)
-        try:
-            logger.info(f"任务 {task.task_id[:8]}, 语言={task.language}, 来源={task.source}")
-            is_first_segment = task.key not in self.state.sessions
-            session = self.state.get_session(task.task_id, task.socket_id, task.source, task.recognition_mode)
-            result = session.result
-            result.phase = 'final' if task.is_final else 'partial'
-            
-            # 2. 预处理音频并获取采样点
-            samples = process_audio_task(task, result)
+        logger.info(f"任务 {task.task_id[:8]}, 语言={task.language}, 来源={task.source}")
+        is_first_segment = task.key not in self.state.sessions
+        session = self.state.get_session(task.task_id, task.socket_id, task.source, task.recognition_mode)
+        result = session.result
+        result.phase = 'final' if task.is_final else 'partial'
+        
+        # 2. 预处理音频并获取采样点
+        samples = process_audio_task(task, result)
 
-            # 空音频或极短音频，跳过推理直接返回
-            if samples is None:
-                result.time_start, result.time_submit = task.time_start, task.time_submit
-                result.time_complete = time.time()
-                result.is_final = task.is_final
-                if task.is_final:
-                    return self._finalize(task, result)
-                return result
-
-            # 3. 执行识别推理
-            stream = self.recognizer.create_stream()
-            stream.accept_waveform(task.samplerate, samples)
-            self.recognizer.decode_stream(stream, context=task.context, language=task.language)
-
-            # 更新基础时序
+        # 空音频或极短音频，跳过推理直接返回
+        if samples is None:
             result.time_start, result.time_submit = task.time_start, task.time_submit
             result.time_complete = time.time()
+            result.is_final = task.is_final
+            if task.is_final:
+                return self._finalize(task, result)
+            return result
 
-            # 4. 路径 A: 简单文本拼接 (主要用于实时回显)
-            asr_raw_text = stream.result.text
-            logger.info(f'模型输出：{asr_raw_text}')
-            console.print(f'\033[0G  模型输出：[cyan]{asr_raw_text}', soft_wrap=True)
-            self._process_simple_merge(result, asr_raw_text)
+        # 3. 执行识别推理
+        stream = self.recognizer.create_stream()
+        stream.accept_waveform(task.samplerate, samples)
+        self.recognizer.decode_stream(stream, context=task.context, language=task.language)
 
-            # 5. 路径 B: 对齐增强 (仅针对文件任务)
-            # 门控：仅在“文件任务”且“引擎不支持时间戳”时，才调用外部 Aligner
-            caps = self.recognizer.capabilities
-            if (task.source == 'file'  
-                and EngineCapabilities.TIMESTAMPS not in caps 
-                and self.aligner 
+        # 更新基础时序
+        result.time_start, result.time_submit = task.time_start, task.time_submit
+        result.time_complete = time.time()
+
+        # 4. 路径 A: 简单文本拼接 (主要用于实时回显)
+        asr_raw_text = stream.result.text
+        logger.info(f'模型输出：{asr_raw_text}')
+        console.print(f'\033[0G  模型输出：[cyan]{asr_raw_text}', soft_wrap=True)
+        self._process_simple_merge(result, asr_raw_text)
+
+        # 5. 路径 B: 对齐增强 (仅针对文件任务)
+        # 门控：仅在“文件任务”且“引擎不支持时间戳”时，才调用外部 Aligner
+        if (task.source == 'file'
+                and EngineCapabilities.TIMESTAMPS not in self.recognizer.capabilities
+                and self.aligner
                 and stream.result.text.strip()):
-                
-                logger.debug(f"🚩 [Pipeline] 正在对文件分片执行对齐补齐...")
-                align_res = self.aligner.align(audio=samples, text=stream.result.text, language=task.language, offset_sec=0.0)
-                if align_res and align_res.items:
-                    stream.result.tokens = [it.text for it in align_res.items]
-                    stream.result.timestamps = [it.start_time for it in align_res.items]
+            logger.debug('正在为文件片段生成字级时间戳')
+            align_res = self.aligner.align(audio=samples, text=stream.result.text,
+                                           language=task.language, offset_sec=0.0)
+            if align_res and align_res.items:
+                stream.result.tokens = [it.text for it in align_res.items]
+                stream.result.timestamps = [it.start_time for it in align_res.items]
 
+        # 6. 精确 Token 级拼接 (即便没有对齐器，原生支持时间戳的模型也会走这里)
+        new_tokens = process_tokens_safely(stream.result.tokens)
+        new_timestamps = list(stream.result.timestamps)
+        
+        result.tokens, result.timestamps = merge_tokens_by_sequence_matcher(
+            prev_tokens=result.tokens,
+            prev_timestamps=result.timestamps,
+            new_tokens=new_tokens,
+            new_timestamps=new_timestamps,
+            offset=task.offset,
+            overlap=task.overlap,
+            is_first_segment=is_first_segment
+        )
+        
+        # 7. 生成精确文本结果 (text_accu)
+        result.text_accu = tokens_to_text(result.tokens)
 
-            # 6. 精确 Token 级拼接 (即便没有对齐器，原生支持时间戳的模型也会走这里)
-            new_tokens = process_tokens_safely(stream.result.tokens)
-            new_timestamps = list(stream.result.timestamps)
-            
-            result.tokens, result.timestamps = merge_tokens_by_sequence_matcher(
-                prev_tokens=result.tokens,
-                prev_timestamps=result.timestamps,
-                new_tokens=new_tokens,
-                new_timestamps=new_timestamps,
-                offset=task.offset,
-                overlap=task.overlap,
-                is_first_segment=is_first_segment
-            )
-            
-            # 7. 生成精确文本结果 (text_accu)
-            result.text_accu = tokens_to_text(result.tokens)
+        # 8. 最终阶段处理 (任务结束时的格式化)
+        if not task.is_final:
+            return result
 
-            # 8. 最终阶段处理 (任务结束时的格式化)
-            if not task.is_final:
-                return result
-
-            return self._finalize(task, result)
-
-        except Exception as e:
-            logger.error(f"推理管线错误: {e}", exc_info=True)
-            raise
+        return self._finalize(task, result)
 
     def _finalize(self, task: Task, result: Result) -> Result:
         # 极短/空尾段也必须完成格式化，不能跳过此前片段的最终收尾。
@@ -179,53 +168,45 @@ class TaskPipeline:
 
         原理与取舍见 worker/streaming.py。每句单独格式化后发出，result.text 是已发出各段的拼接。
         """
-        try:
-            session = self.state.get_session(task.task_id, task.socket_id, task.source, task.recognition_mode)
-            result = session.result
-            result.phase = 'final' if task.is_final else 'partial'
-            if session.stream is None:
-                session.stream = StreamState()
-            stream_state = session.stream
+        session = self.state.get_session(task.task_id, task.socket_id, task.source, task.recognition_mode)
+        result = session.result
+        result.phase = 'final' if task.is_final else 'partial'
+        if session.stream is None:
+            session.stream = StreamState()
+        stream_state = session.stream
 
-            samples = np.frombuffer(task.data, dtype=np.float32)
-            result.duration += len(samples) / task.samplerate
+        samples = np.frombuffer(task.data, dtype=np.float32)
+        result.duration += len(samples) / task.samplerate
 
-            text = ''
-            # 静音句不识别；不足 0.1s 的尾巴同样跳过（与非流式的空片段处理一致）
-            if not task.silent and len(samples) >= 1600:
-                audio, prefix = stream_state.window(samples)
-                stream = self.recognizer.create_stream()
-                stream.accept_waveform(task.samplerate, audio)
-                self.recognizer.decode_stream(stream, context=task.context, language=task.language,
-                                              prefix_text=prefix)
-                text = stream.result.text
-                stream_state.remember(samples, text)
-                logger.info(f'续写：{text}（窗口 {len(audio) / task.samplerate:.1f}s，前缀 {len(prefix)} 字）')
-                console.print(f'\033[0G  续写：[cyan]{text}', soft_wrap=True)
-            elif task.silent:
-                logger.debug(f"跳过静音句，任务 {task.task_id[:8]}，{len(samples) / task.samplerate:.2f}s")
+        text = ''
+        # 静音句不识别；过短的尾巴同样跳过（与非流式的空片段处理一致）
+        if not task.silent and len(samples) >= MIN_SAMPLES:
+            audio, prefix = stream_state.window(samples)
+            stream = self.recognizer.create_stream()
+            stream.accept_waveform(task.samplerate, audio)
+            self.recognizer.decode_stream(stream, context=task.context, language=task.language,
+                                          prefix_text=prefix)
+            text = stream.result.text
+            stream_state.remember(samples, text)
+            logger.info(f'续写：{text}（窗口 {len(audio) / task.samplerate:.1f}s，前缀 {len(prefix)} 字）')
+            console.print(f'\033[0G  续写：[cyan]{text}', soft_wrap=True)
+        elif task.silent:
+            logger.debug(f"跳过静音句，任务 {task.task_id[:8]}，{len(samples) / task.samplerate:.2f}s")
 
-            piece = stream_state.format(stream_state.take(text, task.is_final), self.formatter)
-            result.delta = piece
-            result.text += piece
-            result.time_start, result.time_submit = task.time_start, task.time_submit
-            result.time_complete = time.time()
+        piece = stream_state.format(stream_state.take(text, task.is_final), self.formatter)
+        result.delta = piece
+        result.text += piece
+        result.time_start, result.time_submit = task.time_start, task.time_submit
+        result.time_complete = time.time()
 
-            if not task.is_final:
-                return result
-
-            if result.text:
-                self._fill_uniform_tokens(result)
-            result.is_final = True
-            # 可重识别录音在主进程做最终决定，此处的预览完成不能记作任务完成。
-            if not task.revisable:
-                console.print(f'  流式结果：[green]{result.text}\n', soft_wrap=True)
-                self._log_finished(task, result)
+        if not task.is_final:
             return result
 
-        except Exception as e:
-            logger.error(f"流式推理错误: {e}", exc_info=True)
-            raise
-
-
-
+        if result.text:
+            self._fill_uniform_tokens(result)
+        result.is_final = True
+        # 可重识别录音在主进程做最终决定，此处的预览完成不能记作任务完成。
+        if not task.revisable:
+            console.print(f'  流式结果：[green]{result.text}\n', soft_wrap=True)
+            self._log_finished(task, result)
+        return result

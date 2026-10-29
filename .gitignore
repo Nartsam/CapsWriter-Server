@@ -14,7 +14,7 @@ logs/
 /hot-server.txt
 
 # ---- 本机访问密钥（可选） ----
-/assert/config_repo_token.txt
+/assets/config_repo_token.txt
 
 # ---- Linux Python 环境（由 setup_linux.sh 创建） ----
 .conda-env/

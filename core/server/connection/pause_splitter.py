@@ -27,6 +27,8 @@ from typing import List
 
 import numpy as np
 
+from core.constants import AudioFormat
+
 
 class PauseSplitter:
     """
@@ -35,7 +37,7 @@ class PauseSplitter:
     feed() 喂入新到的音频，返回切点；调用方按返回值依次从自己的缓冲开头切下各句。
     """
 
-    SAMPLE_RATE = 16000
+    SAMPLE_RATE = AudioFormat.SAMPLE_RATE
     FRAME = 800                     # 50ms
     FRAME_SEC = FRAME / SAMPLE_RATE
 

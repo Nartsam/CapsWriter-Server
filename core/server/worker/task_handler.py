@@ -14,6 +14,7 @@ from multiprocessing import Queue
 from multiprocessing.managers import ListProxy
 import queue
 import time
+from core.constants import AudioFormat
 from .pipeline import TaskPipeline
 from ..state import WorkerState
 from ..schema import DiscardTask, Result
@@ -29,8 +30,7 @@ def _parent_alive() -> bool:
 
 class TaskBuffer:
     """按连接、录音、阶段分组缓冲，最新缓冲优先。"""
-    def __init__(self, state: WorkerState):
-        self.state = state
+    def __init__(self):
         self._buffers: OrderedDict[tuple, deque] = OrderedDict()
 
     def enqueue(self, task):
@@ -88,7 +88,7 @@ class TaskHandler:
         self.aligner = None
         self.pipeline = None
 
-        self.buffer = TaskBuffer(state)
+        self.buffer = TaskBuffer()
         self.discarded = set()
 
     def set_engine(self, recognizer, aligner=None):
@@ -116,9 +116,7 @@ class TaskHandler:
                     continue
                 else:
                     return True
-            except InterruptedError:
-                continue
-            
+
             # 判断退出信号
             if task is None:
                 return False
@@ -166,11 +164,11 @@ class TaskHandler:
             try:
                 result = self.pipeline.process(task)
             except Exception as error:
-                logger.error('任务执行出错: %s', error, exc_info=True)
+                logger.error('任务 %s 执行出错: %s', task.task_id[:8], error, exc_info=True)
                 self.discard(task.socket_id, task.task_id, task.recognition_mode)
                 result = Result(
                     task_id=task.task_id, socket_id=task.socket_id, source=task.source,
-                    duration=task.offset + len(task.data) / (task.samplerate * 4),
+                    duration=task.offset + AudioFormat.bytes_to_seconds(len(task.data)),
                     time_start=task.time_start, time_submit=task.time_submit,
                     time_complete=time.time(), is_final=True, phase='final',
                     recognition_mode=task.recognition_mode, status='error', error=str(error))
@@ -192,9 +190,8 @@ class TaskHandler:
                     break
 
                 self.process_next()
-            except InterruptedError:
-                continue
             except Exception as e:
-                logger.error(f"任务执行出错: {str(e)}", exc_info=True)
+                # 队列收发或调度本身出错：记录后继续下一轮，单个任务的失败在 process_next 里处理
+                logger.error(f"任务循环异常: {str(e)}", exc_info=True)
 
         logger.info("TaskHandler 工作循环结束")

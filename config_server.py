@@ -35,7 +35,7 @@ class ServerConfig:
     enable_tray = True      # 是否启用托盘图标（仅 Windows 有控制台窗口时生效，Linux 自动跳过）
 
     # 日志配置
-    log_level = 'DEBUG'          # 日志级别：'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
+    log_level = 'WARNING'        # 日志级别：'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
     aligner_idle_timeout = 10  # 对齐引擎空闲多少秒后自动释放显存 (0 表示不释放；编码器走 DirectML 时一律常驻，见 core/server/engines/manager.py)
 
 
@@ -43,7 +43,7 @@ class HotwordSync:
     """跨设备热词；空 repository 只关闭远端 Git 同步，两端同步仍可用。"""
 
     repository = 'Vartsam/CapsWriterConfig'  # owner/repo 或完整 Git URL
-    token_file = 'assert/config_repo_token.txt'  # 可选 PAT；缺失时复用本机 Git 登录
+    token_file = 'assets/config_repo_token.txt'  # 可选 PAT；缺失时复用本机 Git 登录
 
 
 class ModelPaths:

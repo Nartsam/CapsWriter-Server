@@ -1,0 +1,7 @@
+# 未定义名字检查的已知项（tools/check_undefined.py 读取）
+# 一行一条 `相对路径:名字`。刻意不记行号：行号一变就失效。
+# 这里只放确认过的假阳性，出现新名字就是真问题。
+
+# llama.cpp 的 ctypes 符号在 bind_llama_lib() 里用 global 绑定，静态扫不出来
+core/server/engines/llama/llama.py:llama_batch_get_one
+core/server/engines/llama/llama.py:llama_sampler_init_logit_bias

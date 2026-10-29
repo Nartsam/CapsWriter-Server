@@ -2,8 +2,6 @@
 
 CapsWriter 离线语音输入的**服务端**：通过 WebSocket 接收 CapsWriter-Client（另一个仓库）发来的音频，用 **Qwen3-ASR-1.7B** 在本地识别后返回文字；客户端的“文件转录”额外用 **Qwen3-ForcedAligner** 生成字级时间戳。
 
-Fork 自 [HaujetZhao/CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) v2.5，拆出服务端单独维护（客户端代码和其他识别模型已移除），仅供个人使用。
-
 - 完全离线，识别在本机/自己的服务器上完成
 - Windows 与 Linux 两套入口、同一份代码、相同的参数与行为
 - 显卡加速：LLM 解码走 llama.cpp Vulkan，音频编码器 Windows 用 DirectML、Linux 用 CUDA

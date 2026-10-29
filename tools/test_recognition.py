@@ -3,7 +3,6 @@
 import asyncio
 import ast
 import base64
-import importlib.util
 import io
 import json
 from pathlib import Path
@@ -26,13 +25,36 @@ for name, directory in [('core', 'core'), ('core.server', 'core/server'),
     module.__path__ = [str(ROOT / directory)]
     module.logger = Mock()
     sys.modules[name] = module
-try:
-    import websockets
-except ImportError:
-    spec = importlib.util.spec_from_file_location('websockets', ROOT / 'internal/websockets/__init__.pyc')
-    websockets = importlib.util.module_from_spec(spec)
-    sys.modules['websockets'] = websockets
-    spec.loader.exec_module(websockets)
+# 这里只需要能 import：测试路径上不碰真实的 WebSocket 和 rich 渲染。
+# 装了真包就用真包；internal/ 里的是 3.13 字节码，别的解释器读不了，所以缺包时用桩补上。
+class _Console:
+    """rich.console.Console 的替身：吞掉输出"""
+    quiet = False
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def print(self, *args, **kwargs):
+        pass
+
+    line = rule = print
+
+
+def _stub(name, **members):
+    try:
+        __import__(name)
+    except ImportError:
+        sys.modules[name] = types.ModuleType(name)
+        sys.modules[name].__dict__.update(members)
+
+
+_stub('websockets', ConnectionClosed=type('ConnectionClosed', (Exception,), {}),
+      InvalidState=type('InvalidState', (Exception,), {}), ServerConnection=object)
+_stub('rich')
+_stub('rich.console', Console=_Console, RenderableType=object)
+_stub('rich.style', StyleType=object)
+_stub('rich.status', Status=_Console)
+import websockets
 
 import numpy as np
 from core.protocol import AudioMessage, RecognitionControlMessage, RecognitionMessage
@@ -53,11 +75,13 @@ recognition_module.status_mic = recv_module.status_mic
 
 
 class FakeSocket:
-    def __init__(self, socket_id='socket', incoming=()):
+    def __init__(self, socket_id='socket', incoming=(), path='/'):
         self.id = socket_id
         self.sent = []
         self.incoming = incoming
         self.remote_address = ('127.0.0.1', 12345)
+        # 与 websockets.ServerConnection 一致：握手请求挂在 request 上
+        self.request = types.SimpleNamespace(path=path)
 
     async def send(self, text):
         self.sent.append(json.loads(text))
@@ -376,7 +400,7 @@ class RecognitionTests(unittest.IsolatedAsyncioTestCase):
         await self.send(audio())
         # 模拟已运行片段和随后排队片段，使用真实 TaskHandler 与发布入口。
         for offset in (0, .3):
-            task = recv_module._make_task(self.message(), 'socket', audio(), offset, False, streaming=True)
+            task = recv_module.make_task(self.message(), 'socket', audio(), offset, False, streaming=True)
             runtime_status.task_queued()
             self.app.state.queue_in.put(task)
         self.drain()
@@ -588,7 +612,7 @@ class RecognitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.finals()), 1)
 
     async def test_worker_snapshot_and_stage_isolation(self):
-        base = recv_module._make_task(self.message(), 'socket', audio(), 0, False, streaming=True)
+        base = recv_module.make_task(self.message(), 'socket', audio(), 0, False, streaming=True)
         for task in (base, replace(base, offset=.3), replace(base, streaming=False, is_final=True)):
             runtime_status.task_queued()
             self.worker.accept(task)
